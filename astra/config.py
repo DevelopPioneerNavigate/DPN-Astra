@@ -11,6 +11,7 @@ class Config:
     ollama_url: str = "http://127.0.0.1:11434"
     data_dir: Path = Path.home() / ".dpn-astra"
     port: int = 8766
+    project_dir: Path | None = None
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -24,4 +25,14 @@ class Config:
         port = int(os.getenv("ASTRA_PORT", "8766"))
         if not 0 < port < 65536:
             raise ValueError("ASTRA_PORT must be between 1 and 65535")
-        return cls(model=model, ollama_url=url, data_dir=Path(os.getenv("ASTRA_DATA_DIR", str(Path.home() / ".dpn-astra"))).expanduser(), port=port)
+        project_dir_value = os.getenv("ASTRA_PROJECT_DIR", "").strip()
+        project_dir = Path(project_dir_value).expanduser().resolve() if project_dir_value else None
+        if project_dir is not None and not project_dir.is_dir():
+            raise ValueError("ASTRA_PROJECT_DIR must point to an existing directory")
+        return cls(
+            model=model,
+            ollama_url=url,
+            data_dir=Path(os.getenv("ASTRA_DATA_DIR", str(Path.home() / ".dpn-astra"))).expanduser(),
+            port=port,
+            project_dir=project_dir,
+        )

@@ -53,13 +53,17 @@ All variables are optional:
 | `ASTRA_OLLAMA_URL` | `http://127.0.0.1:11434` | Local loopback Ollama endpoint only |
 | `ASTRA_PORT` | `8766` | Local console port |
 | `ASTRA_DATA_DIR` | `~/.dpn-astra` | Local saved-memory database directory |
+| `ASTRA_PROJECT_DIR` | unset | Opt-in project root for bounded, read-only source context |
 
 Example PowerShell:
 
 ```powershell
 $env:ASTRA_MODEL="qwen2.5:7b"
+$env:ASTRA_PROJECT_DIR="C:\path\to\your\project"
 py -3 run_astra.py
 ```
+
+When `ASTRA_PROJECT_DIR` is set, each chat request searches a bounded set of source and configuration files in that directory and adds relevant excerpts with relative paths and line numbers to the local model prompt. The read-only Project Inspector also provides ranked source search and a file metadata index. Repository permissions explicitly allow reads only; edits and command execution remain denied. The index excludes common dependency/build directories and credential-named files, redacts common secret assignments, and enforces directory-entry, file-count and byte limits. Review the files in your project and do not treat these safeguards as a guarantee that arbitrary source contains no secrets. Relevant excerpts are sent to the configured loopback Ollama service. The console indicates whether project context is enabled.
 
 If a model is missing or Ollama is stopped, ASTRA reports the real error; it never fabricates a model response.
 

@@ -12,6 +12,7 @@
 - Encrypted memory at rest with export, full deletion, retention limits, and opt-in RAG.
 - Separate facts, hypotheses, source citations, lab notes, and code evidence.
 - Real tests for HTTP layer, malformed requests, and storage lifecycle.
+- **In progress:** opt-in bounded repository retrieval grounds model prompts in local source excerpts with relative-path and line-number citations. A read-only file index and ranked search are available, with edits and execution explicitly denied. This is not a multi-file editing engine.
 
 ## v0.3 — ASTRA PRESENCE
 - Dedicated Windows desktop wrapper and audio pipeline with explicit microphone controls.

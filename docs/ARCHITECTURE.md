@@ -10,6 +10,7 @@ flowchart LR
   Presence --> API[Loopback HTTP API]
   API --> Core[CORE: persona and conversation]
   Core --> Ollama[Ollama: local LLM]
+  Core --> Repo[Optional read-only repository context]
   Core --> Archive[ARCHIVE: consented SQLite memory]
   API -. blocked .-> Command[COMMAND: denied]
   API -. unavailable .-> Sense[SENSE: unconnected]
@@ -38,4 +39,6 @@ flowchart LR
 
 ## Implementation reality
 
-This is a single-user localhost prototype, not a remote multi-tenant service. Session conversations are RAM-only, unencrypted SQLite is used only for intentionally saved facts, and model inference runs via an operator-managed Ollama instance. The web API does not run tools. No production readiness or external integration is claimed.
+This is a single-user localhost prototype, not a remote multi-tenant service. Session conversations are RAM-only, unencrypted SQLite is used only for intentionally saved facts, and model inference runs via an operator-managed Ollama instance. An optional `ASTRA_PROJECT_DIR` enables bounded, read-only source retrieval with relative-path and line-number citations; it does not execute or edit project files. The web API does not run tools. No production readiness or external integration is claimed.
+
+Repository context is opt-in, stays beneath the configured project root, and skips common generated/dependency directories, symlinks, and credential-named files. Directory entries, file count, per-file size, total bytes, matched-file count, and prompt excerpt size are bounded. Common secret assignments are redacted, but source content cannot be guaranteed free of secrets; enabling context means relevant excerpts are sent to the configured local Ollama model. Retrieved source is placed in a separate user message and identified by the system instructions as untrusted reference data. The read-only project inspector exposes relative-path metadata and ranked excerpts. Repository read permission is granted only by explicit project configuration; edit and execution permissions default to denied, and no current route can perform either action.

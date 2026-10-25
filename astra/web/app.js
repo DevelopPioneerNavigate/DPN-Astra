@@ -41,6 +41,8 @@
       const status = await api("/api/status");
       const model = status.model_status;
       const ready = model.connected && model.model_installed;
+      $("project-state").textContent = status.project_context.enabled ? "READ-ONLY PROJECT CONTEXT: ON" : "PROJECT CONTEXT: OFF";
+      $("project-inspector").hidden = !status.project_context.enabled;
       statusChip.textContent = ready ? "MODEL ONLINE" : model.connected ? "MODEL NOT INSTALLED" : "OLLAMA OFFLINE";
       statusChip.classList.toggle("good", ready);
       const descriptions = {
@@ -134,6 +136,34 @@
       await refreshMemories();
       notice.textContent = "Memory saved locally at your explicit request.";
     } catch (error) { report(error); }
+  });
+
+  $("project-search-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const query = $("project-search-input").value.trim();
+    if (!query) return;
+    const status = $("project-search-status");
+    const results = $("project-search-results");
+    status.textContent = "Searching the configured project within read-only indexing limits…";
+    results.replaceChildren();
+    try {
+      const data = await api("/api/project/search?q=" + encodeURIComponent(query));
+      for (const match of data.matches) {
+        const section = document.createElement("section");
+        const heading = document.createElement("b");
+        heading.textContent = match.path + " · relevance " + match.score;
+        const excerpt = document.createElement("pre");
+        excerpt.textContent = match.excerpt;
+        section.append(heading, excerpt);
+        results.append(section);
+      }
+      status.textContent = data.matches.length
+        ? "Read-only search returned " + data.matches.length + " source excerpt(s)."
+        : "No matching source excerpts found.";
+      if (data.warnings.length) status.textContent += " Indexing note: " + data.warnings.join("; ");
+    } catch (error) {
+      status.textContent = "Project search failed: " + (error.message || String(error));
+    }
   });
 
   $("speech").addEventListener("click", () => {

@@ -77,6 +77,20 @@ def make_handler(core: AstraCore):
                     self._send(400, {"error": str(exc)})
             elif url.path == "/api/memories":
                 self._send(200, {"memories": core.archive.list_memories()})
+            elif url.path == "/api/project/files":
+                if core.repository is None:
+                    self._send(404, {"error": "Read-only project context is not enabled"})
+                    return
+                self._send(200, core.repository.files())
+            elif url.path == "/api/project/search":
+                if core.repository is None:
+                    self._send(404, {"error": "Read-only project context is not enabled"})
+                    return
+                query = parse_qs(url.query).get("q", [""])[0]
+                try:
+                    self._send(200, core.repository.search(query))
+                except ValueError as exc:
+                    self._send(400, {"error": str(exc)})
             else:
                 self._send(404, {"error": "Not found"})
 

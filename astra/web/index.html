@@ -57,10 +57,20 @@
         <div class="centerfoot"><span><i class="square"></i> LOCAL INFERENCE</span><span><i class="square violet"></i> OPT-IN ARCHIVE</span><span><i class="square grey"></i> COMMAND LOCKED</span></div>
       </section>
       <section class="chatpanel panel" aria-label="Conversation and memory">
-        <div class="chathead"><div><span class="eyebrow">DIRECT CHANNEL</span><h2>Converse with ASTRA</h2></div><button id="clear" class="ghost" title="Clear current session conversation">Clear chat</button></div>
+        <div class="chathead"><div><span class="eyebrow">DIRECT CHANNEL</span><h2>Converse with ASTRA</h2><span id="project-state" class="micro">PROJECT CONTEXT: OFF</span></div><button id="clear" class="ghost" title="Clear current session conversation">Clear chat</button></div>
         <div id="conversation" class="conversation" role="log" aria-label="Conversation transcript" aria-live="polite">
           <div class="message astra"><span class="speaker">ASTRA / INITIALIZATION</span><p>Presence console established. Connect a local Ollama model to begin a real conversation. Until then, I won't pretend my reasoning engine is online.</p></div>
         </div>
+        <details id="project-inspector" class="memory" hidden>
+          <summary class="eyebrow">PROJECT INSPECTOR / READ ONLY</summary>
+          <form id="project-search-form" class="memoryform">
+            <label class="visuallyhidden" for="project-search-input">Search project source</label>
+            <input id="project-search-input" maxlength="200" placeholder="Search source and configuration">
+            <button class="ghost" type="submit">Search</button>
+          </form>
+          <p id="project-search-status" class="notice">Source is read-only. No files are edited or commands executed.</p>
+          <div id="project-search-results" class="memorylist" aria-live="polite"></div>
+        </details>
         <div class="composer">
           <form id="chat-form"><label class="visuallyhidden" for="message">Message ASTRA</label><textarea id="message" maxlength="4000" rows="3" placeholder="Ask a question. Propose an experiment. Challenge an assumption."></textarea><div class="composerbar"><div><button type="button" id="mic" class="ghost" title="Dictation uses browser microphone permission">◉ Mic</button><button type="button" id="speech" class="ghost" aria-pressed="false" title="Speak replies using browser voices">◈ Voice: Off</button></div><button id="send" type="submit" class="primary">TRANSMIT <span>↗</span></button></div></form>
           <p id="notice" class="notice">Conversation is in memory only and clears when the process restarts. Saved facts are separate.</p>

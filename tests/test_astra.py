@@ -62,6 +62,7 @@ class AstraTests(unittest.TestCase):
     def test_status_truthfulness(self):
         status = self.core.status()
         self.assertEqual("disabled", status["modules"]["COMMAND"])
+        self.assertFalse(status["project_context"]["enabled"])
         self.assertFalse(status["security"]["remote_actions"])
 
     def test_config_rejects_remote_model(self):
