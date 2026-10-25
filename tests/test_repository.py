@@ -11,6 +11,7 @@ from astra.archive import Archive
 from astra.config import Config
 from astra.core import AstraCore
 from astra.permissions import RepositoryPermissions
+from astra.project_changes import ProjectChanges
 from astra.repository import RepositoryContext
 from astra.server import make_handler
 
@@ -155,6 +156,23 @@ class ProjectApiTests(unittest.TestCase):
         response = connection.getresponse()
         return response.status, json.loads(response.read())
 
+    def post_json(self, path, payload):
+        connection = HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=2)
+        self.addCleanup(connection.close)
+        body = json.dumps(payload).encode("utf-8")
+        connection.request(
+            "POST",
+            path,
+            body=body,
+            headers={
+                "Host": f"localhost:{self.server.server_address[1]}",
+                "Content-Length": str(len(body)),
+                "Content-Type": "application/json",
+            },
+        )
+        response = connection.getresponse()
+        return response.status, json.loads(response.read())
+
     def test_project_search_and_file_index_http_endpoints(self):
         status, result = self.get_json("/api/project/search?q=dispatch_job")
         self.assertEqual(200, status)
@@ -184,6 +202,103 @@ class ProjectApiTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join()
+
+    def test_change_preview_apply_and_rollback_http_workflow(self):
+        path = self.root / "engine.py"
+        original = path.read_bytes()
+        status, result = self.post_json("/api/project/proposals", {
+            "path": "engine.py",
+            "content": "def dispatch_job():\n    return 'reviewed'\n",
+        })
+        self.assertEqual(201, status)
+        proposal = result["proposal"]
+        self.assertEqual("pending", proposal["state"])
+        self.assertIn("-    return 'queued'", proposal["diff"])
+        self.assertEqual(original, path.read_bytes())
+
+        route = f"/api/project/proposals/{proposal['id']}/apply"
+        status, _ = self.post_json(route, {"confirm": False})
+        self.assertEqual(403, status)
+        self.assertEqual(original, path.read_bytes())
+
+        status, result = self.post_json(route, {"confirm": True})
+        self.assertEqual(200, status)
+        self.assertEqual("applied", result["proposal"]["state"])
+        self.assertIn("reviewed", path.read_text(encoding="utf-8"))
+
+        route = f"/api/project/proposals/{proposal['id']}/rollback"
+        status, result = self.post_json(route, {"confirm": True})
+        self.assertEqual(200, status)
+        self.assertEqual("rolled_back", result["proposal"]["state"])
+        self.assertEqual(original, path.read_bytes())
+
+
+class ProjectChangesTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.target = self.root / "sample.py"
+        self.target.write_bytes(b"value = 1\r\n")
+        self.changes = ProjectChanges(self.root, RepositoryPermissions(read=True))
+
+    def test_preview_is_read_only_and_explicit_approval_applies(self):
+        proposal = self.changes.propose("sample.py", "value = 2\n")
+        self.assertEqual("pending", proposal["state"])
+        self.assertIn("-value = 1", proposal["diff"])
+        self.assertIn("+value = 2", proposal["diff"])
+        self.assertEqual(b"value = 1\r\n", self.target.read_bytes())
+
+        with self.assertRaises(PermissionError):
+            self.changes.apply(proposal["id"])
+        applied = self.changes.apply(proposal["id"], confirmed=True)
+        self.assertEqual("applied", applied["state"])
+        self.assertEqual(b"value = 2\r\n", self.target.read_bytes())
+
+    def test_rollback_restores_exact_original_bytes(self):
+        original = self.target.read_bytes()
+        proposal = self.changes.propose("sample.py", "value = 3\n")
+        self.changes.apply(proposal["id"], confirmed=True)
+        result = self.changes.rollback(proposal["id"], confirmed=True)
+        self.assertEqual("rolled_back", result["state"])
+        self.assertEqual(original, self.target.read_bytes())
+
+    def test_apply_refuses_to_overwrite_file_changed_after_review(self):
+        proposal = self.changes.propose("sample.py", "value = 4\n")
+        self.target.write_bytes(b"value = 9\n")
+        with self.assertRaisesRegex(ValueError, "changed since review"):
+            self.changes.apply(proposal["id"], confirmed=True)
+        self.assertEqual(b"value = 9\n", self.target.read_bytes())
+
+    def test_rollback_refuses_to_overwrite_file_changed_after_apply(self):
+        proposal = self.changes.propose("sample.py", "value = 5\n")
+        self.changes.apply(proposal["id"], confirmed=True)
+        self.target.write_bytes(b"value = 6\n")
+        with self.assertRaisesRegex(ValueError, "changed since review"):
+            self.changes.rollback(proposal["id"], confirmed=True)
+        self.assertEqual(b"value = 6\n", self.target.read_bytes())
+
+    def test_path_and_file_restrictions(self):
+        with self.assertRaises(ValueError):
+            self.changes.read_file("../outside.py")
+        with self.assertRaises(ValueError):
+            self.changes.read_file(".env")
+        with self.assertRaises(ValueError):
+            self.changes.read_file("notes.bin")
+        with self.assertRaises(ValueError):
+            self.changes.propose("sample.py", "x" * (24 * 1024 + 1))
+
+    def test_symlinked_targets_are_rejected(self):
+        outside = self.root.parent / (self.root.name + "-outside.py")
+        outside.write_text("value = 1\n", encoding="utf-8")
+        self.addCleanup(outside.unlink, missing_ok=True)
+        link = self.root / "linked.py"
+        try:
+            link.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            self.skipTest("Symbolic links are unavailable in this environment")
+        with self.assertRaises(ValueError):
+            self.changes.read_file("linked.py")
 
 
 if __name__ == "__main__":

@@ -12,8 +12,8 @@ class RepositoryPermissions:
         if not self.read:
             raise PermissionError("Repository read access is not authorized")
 
-    def require_edit(self):
-        if not self.edit:
+    def require_edit(self, approved=False):
+        if not self.edit and approved is not True:
             raise PermissionError("Repository edits are not authorized")
 
     def require_execute(self):

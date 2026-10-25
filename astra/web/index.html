@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#070509">
   <title>DPN ASTRA | Scientific Command Presence</title>
   <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/project.css">
   <script defer src="/app.js"></script>
 </head>
 <body>
@@ -62,14 +63,31 @@
           <div class="message astra"><span class="speaker">ASTRA / INITIALIZATION</span><p>Presence console established. Connect a local Ollama model to begin a real conversation. Until then, I won't pretend my reasoning engine is online.</p></div>
         </div>
         <details id="project-inspector" class="memory" hidden>
-          <summary class="eyebrow">PROJECT INSPECTOR / READ ONLY</summary>
+          <summary class="eyebrow">PROJECT INSPECTOR / REVIEW-GATED WRITES</summary>
           <form id="project-search-form" class="memoryform">
             <label class="visuallyhidden" for="project-search-input">Search project source</label>
             <input id="project-search-input" maxlength="200" placeholder="Search source and configuration">
             <button class="ghost" type="submit">Search</button>
           </form>
-          <p id="project-search-status" class="notice">Source is read-only. No files are edited or commands executed.</p>
+          <p id="project-search-status" class="notice">Source search is read-only. Any file change requires a reviewed diff and separate confirmation. Commands are never executed.</p>
           <div id="project-search-results" class="memorylist" aria-live="polite"></div>
+          <section class="change-workbench">
+            <span class="eyebrow">CHANGE REVIEW / USER APPROVAL REQUIRED</span>
+            <form id="project-file-form" class="memoryform">
+              <label class="visuallyhidden" for="project-file-path">Existing project file path</label>
+              <input id="project-file-path" maxlength="240" placeholder="Existing relative file path (e.g. src/core.py)" required>
+              <button class="ghost" type="submit">Load</button>
+            </form>
+            <label class="visuallyhidden" for="project-file-content">Proposed file content</label>
+            <textarea id="project-file-content" maxlength="24576" rows="10" spellcheck="false" placeholder="Load an existing UTF-8 project file to review or edit it. Changes are not written until you review the diff and confirm Apply." disabled></textarea>
+            <button id="project-propose" class="ghost" type="button" disabled>Preview change</button>
+            <p id="project-change-status" class="notice" aria-live="polite">No project changes staged. Commands are never executed.</p>
+            <pre id="project-change-diff" class="change-diff" aria-label="Proposed source diff"></pre>
+            <div class="memoryform">
+              <button id="project-apply" class="primary" type="button" hidden>Apply reviewed change</button>
+              <button id="project-rollback" class="ghost" type="button" hidden>Rollback applied change</button>
+            </div>
+          </section>
         </details>
         <div class="composer">
           <form id="chat-form"><label class="visuallyhidden" for="message">Message ASTRA</label><textarea id="message" maxlength="4000" rows="3" placeholder="Ask a question. Propose an experiment. Challenge an assumption."></textarea><div class="composerbar"><div><button type="button" id="mic" class="ghost" title="Dictation uses browser microphone permission">◉ Mic</button><button type="button" id="speech" class="ghost" aria-pressed="false" title="Speak replies using browser voices">◈ Voice: Off</button></div><button id="send" type="submit" class="primary">TRANSMIT <span>↗</span></button></div></form>

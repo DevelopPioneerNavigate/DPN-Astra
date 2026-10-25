@@ -8,8 +8,8 @@ from .core import AstraCore
 from .provider import ModelError
 
 WEB_DIR = Path(__file__).parent / "web"
-ASSETS = {"/": ("index.html", "text/html; charset=utf-8"), "/app.css": ("app.css", "text/css; charset=utf-8"), "/app.js": ("app.js", "application/javascript; charset=utf-8")}
-MAX_BODY = 8192
+ASSETS = {"/": ("index.html", "text/html; charset=utf-8"), "/app.css": ("app.css", "text/css; charset=utf-8"), "/project.css": ("project.css", "text/css; charset=utf-8"), "/app.js": ("app.js", "application/javascript; charset=utf-8")}
+MAX_BODY = 65536
 
 
 def make_handler(core: AstraCore):
@@ -91,6 +91,17 @@ def make_handler(core: AstraCore):
                     self._send(200, core.repository.search(query))
                 except ValueError as exc:
                     self._send(400, {"error": str(exc)})
+            elif url.path == "/api/project/file":
+                if core.repository is None:
+                    self._send(404, {"error": "Read-only project context is not enabled"})
+                    return
+                relative_path = parse_qs(url.query).get("path", [""])[0]
+                try:
+                    self._send(200, core.repository.changes.read_file(relative_path))
+                except (FileNotFoundError, NotADirectoryError):
+                    self._send(404, {"error": "Project file was not found"})
+                except ValueError as exc:
+                    self._send(400, {"error": str(exc)})
             else:
                 self._send(404, {"error": "Not found"})
 
@@ -108,12 +119,44 @@ def make_handler(core: AstraCore):
                 elif path == "/api/history/clear":
                     core.clear_history(body.get("session", "default"))
                     self._send(200, {"cleared": True})
+                elif path == "/api/project/proposals":
+                    if core.repository is None:
+                        self._send(404, {"error": "Read-only project context is not enabled"})
+                        return
+                    proposal = core.repository.changes.propose(body.get("path"), body.get("content"))
+                    self._send(201, {"proposal": proposal})
+                elif path.startswith("/api/project/proposals/"):
+                    if core.repository is None:
+                        self._send(404, {"error": "Read-only project context is not enabled"})
+                        return
+                    parts = path.strip("/").split("/")
+                    if len(parts) != 5 or parts[2] != "proposals" or parts[4] not in {"apply", "rollback"}:
+                        self._send(404, {"error": "Not found"})
+                        return
+                    proposal_id = parts[3]
+                    if parts[4] == "apply":
+                        proposal = core.repository.changes.apply(
+                            proposal_id,
+                            confirmed=body.get("confirm") is True,
+                        )
+                    else:
+                        proposal = core.repository.changes.rollback(
+                            proposal_id,
+                            confirmed=body.get("confirm") is True,
+                        )
+                    self._send(200, {"proposal": proposal})
                 else:
                     self._send(404, {"error": "Not found"})
             except ValueError as exc:
                 self._send(400, {"error": str(exc)})
+            except PermissionError as exc:
+                self._send(403, {"error": str(exc)})
+            except (FileNotFoundError, NotADirectoryError):
+                self._send(404, {"error": "Project file was not found"})
             except ModelError as exc:
                 self._send(503, {"error": str(exc)})
+            except OSError as exc:
+                self._send(500, {"error": f"Project file operation failed: {exc.strerror or str(exc)}"})
 
         def do_DELETE(self):
             if not self._authorized_host(write=True):

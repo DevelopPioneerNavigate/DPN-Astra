@@ -1,0 +1,4 @@
+.change-workbench{border-top:1px solid var(--line);margin-top:16px;padding-top:15px}
+.change-workbench textarea{display:block;width:100%;min-height:180px;resize:vertical;margin-top:10px;padding:10px;border:1px solid rgba(255,255,255,.13);border-radius:3px;background:#0d0a14;color:var(--white);font:11px/1.5 Consolas,monospace}
+.change-diff{max-height:260px;overflow:auto;padding:10px;background:#09070e;border:1px solid rgba(255,255,255,.08);color:#cfc4d2;font:10px/1.5 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.change-workbench [hidden]{display:none}

@@ -10,6 +10,8 @@
   const notice = $("notice");
   let speaking = false;
   let busy = false;
+  let stagedChange = null;
+  let rollbackChange = null;
 
   function display(role, value, label) {
     const div = document.createElement("div");
@@ -163,6 +165,116 @@
       if (data.warnings.length) status.textContent += " Indexing note: " + data.warnings.join("; ");
     } catch (error) {
       status.textContent = "Project search failed: " + (error.message || String(error));
+    }
+  });
+
+  $("project-file-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const path = $("project-file-path").value.trim();
+    if (!path) return;
+    const status = $("project-change-status");
+    try {
+      const file = await api("/api/project/file?path=" + encodeURIComponent(path));
+      $("project-file-path").value = file.path;
+      $("project-file-content").value = file.content;
+      $("project-file-content").disabled = false;
+      $("project-propose").disabled = false;
+      stagedChange = null;
+      $("project-change-diff").textContent = "";
+      $("project-apply").hidden = true;
+      $("project-rollback").hidden = !rollbackChange;
+      status.textContent = "Loaded " + file.path + " (" + file.bytes + " bytes). Editing is staged only; the file has not changed.";
+    } catch (error) {
+      status.textContent = "Project file load failed: " + (error.message || String(error));
+    }
+  });
+
+  $("project-propose").addEventListener("click", async () => {
+    const status = $("project-change-status");
+    $("project-propose").disabled = true;
+    try {
+      const response = await api("/api/project/proposals", {
+        method: "POST",
+        body: JSON.stringify({
+          path: $("project-file-path").value.trim(),
+          content: $("project-file-content").value
+        })
+      });
+      stagedChange = response.proposal;
+      $("project-change-diff").textContent = stagedChange.diff;
+      $("project-apply").hidden = false;
+      $("project-rollback").hidden = !rollbackChange;
+      status.textContent = "Review the complete diff for " + stagedChange.path + ". No file has been written.";
+    } catch (error) {
+      stagedChange = null;
+      $("project-change-diff").textContent = "";
+      $("project-apply").hidden = true;
+      status.textContent = "Change preview failed: " + (error.message || String(error));
+    } finally {
+      $("project-propose").disabled = false;
+    }
+  });
+
+  $("project-file-content").addEventListener("input", () => {
+    if (stagedChange && stagedChange.state === "pending") {
+      stagedChange = null;
+      $("project-change-diff").textContent = "";
+      $("project-apply").hidden = true;
+      $("project-change-status").textContent = "The editor changed after preview. Generate and review a new diff before applying.";
+    }
+  });
+
+  $("project-apply").addEventListener("click", async () => {
+    if (!stagedChange) return;
+    const proposal = stagedChange;
+    if (!confirm("Apply the reviewed change to " + proposal.path + "?\n\nASTRA will not run commands.")) return;
+    $("project-apply").disabled = true;
+    try {
+      const response = await api("/api/project/proposals/" + encodeURIComponent(proposal.id) + "/apply", {
+        method: "POST",
+        body: JSON.stringify({ confirm: true })
+      });
+      stagedChange = response.proposal;
+      rollbackChange = response.proposal;
+      $("project-apply").hidden = true;
+      $("project-rollback").hidden = false;
+      $("project-change-status").textContent = "Applied " + proposal.path + ". Rollback remains available until ASTRA restarts or this proposal expires.";
+      try {
+        const file = await api("/api/project/file?path=" + encodeURIComponent(proposal.path));
+        $("project-file-content").value = file.content;
+      } catch (error) {
+        $("project-change-status").textContent += " The file was applied, but the editor refresh failed: " + (error.message || String(error));
+      }
+    } catch (error) {
+      $("project-change-status").textContent = "Apply failed: " + (error.message || String(error));
+    } finally {
+      $("project-apply").disabled = false;
+    }
+  });
+
+  $("project-rollback").addEventListener("click", async () => {
+    if (!rollbackChange) return;
+    const proposal = rollbackChange;
+    if (!confirm("Restore the exact pre-change contents of " + proposal.path + "? This will fail if the file changed since Apply.")) return;
+    $("project-rollback").disabled = true;
+    try {
+      const response = await api("/api/project/proposals/" + encodeURIComponent(proposal.id) + "/rollback", {
+        method: "POST",
+        body: JSON.stringify({ confirm: true })
+      });
+      rollbackChange = null;
+      $("project-rollback").hidden = true;
+      $("project-change-status").textContent = "Rolled back " + proposal.path + " to its exact reviewed original bytes.";
+      try {
+        const file = await api("/api/project/file?path=" + encodeURIComponent(proposal.path));
+        $("project-file-content").value = file.content;
+      } catch (error) {
+        $("project-change-status").textContent += " Rollback succeeded, but the editor refresh failed: " + (error.message || String(error));
+      }
+    } catch (error) {
+      $("project-change-status").textContent = "Rollback failed: " + (error.message || String(error));
+    } finally {
+      $("project-rollback").disabled = false;
     }
   });
 

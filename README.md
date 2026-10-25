@@ -63,7 +63,7 @@ $env:ASTRA_PROJECT_DIR="C:\path\to\your\project"
 py -3 run_astra.py
 ```
 
-When `ASTRA_PROJECT_DIR` is set, each chat request searches a bounded set of source and configuration files in that directory and adds relevant excerpts with relative paths and line numbers to the local model prompt. The read-only Project Inspector also provides ranked source search and a file metadata index. Repository permissions explicitly allow reads only; edits and command execution remain denied. The index excludes common dependency/build directories and credential-named files, redacts common secret assignments, and enforces directory-entry, file-count and byte limits. Review the files in your project and do not treat these safeguards as a guarantee that arbitrary source contains no secrets. Relevant excerpts are sent to the configured loopback Ollama service. The console indicates whether project context is enabled.
+When `ASTRA_PROJECT_DIR` is set, each chat request searches a bounded set of source and configuration files in that directory and adds relevant excerpts with relative paths and line numbers to the local model prompt. The Project Inspector also provides ranked source search and a file metadata index. Its change workbench loads an existing small UTF-8 file, stages a reviewable diff, and only writes after a separate explicit confirmation. Changes can be rolled back during the current process lifetime if the file has not changed since application. This is not automatic model editing: the user supplies/reviews the replacement contents. Command execution remains denied. The index excludes common dependency/build directories and credential-named files, redacts common secret assignments, and enforces directory-entry, file-count and byte limits. Review the files in your project and do not treat these safeguards as a guarantee that arbitrary source contains no secrets. Relevant excerpts are sent to the configured loopback Ollama service. The console indicates whether project context is enabled.
 
 If a model is missing or Ollama is stopped, ASTRA reports the real error; it never fabricates a model response.
 
@@ -73,7 +73,7 @@ If a model is missing or Ollama is stopped, ASTRA reports the real error; it nev
 - Chats exist only in process memory. Explicitly saved facts live in `ASTRA_DATA_DIR/astra_memory.sqlite3`.
 - Stored facts are **not encrypted** in this prototype; do not save secrets or sensitive personal details.
 - A user can view and delete each saved fact. Clearing the chat does not delete saved facts.
-- External commands and infrastructure controls cannot execute. Future integrations require approval gates, audit logs, a permissions model, and independent physical interlocks.
+- External commands and infrastructure controls cannot execute. Project writes are limited to reviewed existing text files and require a separate per-change confirmation; rollback is guarded against overwriting intervening edits. Future integrations require stronger authentication, durable audit logs, and independent physical interlocks.
 - Browser dictation and speech depend on browser support; dictation is initiated only after clicking Mic.
 - No unattended agent loop is enabled.
 

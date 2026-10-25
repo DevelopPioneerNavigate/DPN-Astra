@@ -51,6 +51,9 @@ class RepositoryContext:
             raise ValueError("ASTRA_PROJECT_DIR must point to a directory")
         self.permissions = permissions or RepositoryPermissions(read=True)
         self.permissions.require_read()
+        from .project_changes import ProjectChanges
+
+        self.changes = ProjectChanges(self.root, self.permissions)
 
     def context_for(self, query: str) -> str:
         result = self.search(query)
