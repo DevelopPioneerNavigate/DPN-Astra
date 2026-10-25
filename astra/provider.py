@@ -18,7 +18,8 @@ class OllamaProvider:
             with urlopen(Request(self.base_url + "/api/tags"), timeout=2) as response:
                 data = json.load(response)
             installed = [m.get("name", "") for m in data.get("models", [])]
-            return {"connected": True, "model_installed": self.model in installed, "installed_models": installed[:20]}
+            installed_match = self.model in installed or (":" not in self.model and self.model + ":latest" in installed)
+            return {"connected": True, "model_installed": installed_match, "installed_models": installed[:20]}
         except (HTTPError, URLError, TimeoutError, ValueError, OSError):
             return {"connected": False, "model_installed": False, "installed_models": []}
 
