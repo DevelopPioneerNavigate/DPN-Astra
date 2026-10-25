@@ -242,6 +242,44 @@
     }
   });
 
+  $("project-validate-all").addEventListener("click", async () => {
+    const button = $("project-validate-all");
+    const summary = $("project-validation-summary");
+    const results = $("project-validation-results");
+    button.disabled = true;
+    summary.textContent = "Checking bounded project source without executing project code…";
+    results.replaceChildren();
+    try {
+      const response = await api("/api/project/validate-all", {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      const report = response.validation;
+      const counts = report.summary;
+      summary.textContent = "Static checks: " + counts.valid + " valid, " +
+        counts.invalid + " invalid, " + counts.skipped + " skipped.";
+      for (const result of report.results) {
+        const item = document.createElement("li");
+        const detail = (result.language ? result.language + " " : "") +
+          (result.error.message.startsWith("Skipped:") ? result.error.message :
+            "syntax error" +
+            (result.error.line ? " at " + result.error.line + ":" + result.error.column : "") +
+            ": " + result.error.message);
+        item.textContent = result.path + " — " + detail;
+        results.append(item);
+      }
+      if (report.truncated) summary.textContent += " Only the first 100 diagnostics are listed.";
+      if (counts.checked === 0 && counts.skipped === 0) summary.textContent += " No supported files found.";
+      if (report.warnings.length) {
+        summary.textContent += " Scan notes: " + report.warnings.join("; ");
+      }
+    } catch (error) {
+      summary.textContent = "Project syntax validation failed: " + (error.message || String(error));
+    } finally {
+      button.disabled = false;
+    }
+  });
+
   $("project-file-content").addEventListener("input", () => {
     if (stagedChange && stagedChange.state === "pending") {
       stagedChange = null;

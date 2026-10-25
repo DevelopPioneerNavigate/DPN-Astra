@@ -8,6 +8,7 @@ from .project_changes import ProjectChanges
 
 
 MAX_VALIDATION_BYTES = 24 * 1024
+MAX_PROJECT_DIAGNOSTICS = 100
 VALIDATORS = {
     ".json": "JSON",
     ".py": "Python",
@@ -16,8 +17,9 @@ VALIDATORS = {
 
 
 class ProjectValidation:
-    def __init__(self, changes: ProjectChanges):
+    def __init__(self, changes: ProjectChanges, list_files):
         self.changes = changes
+        self.list_files = list_files
 
     def validate(self, relative_path: str, content: str | None = None) -> dict:
         file = self.changes.read_file(relative_path)
@@ -28,7 +30,11 @@ class ProjectValidation:
         if content is not None:
             if not isinstance(content, str):
                 raise ValueError("Validation content must be text")
-            if len(content.encode("utf-8")) > MAX_VALIDATION_BYTES:
+            try:
+                content_bytes = content.encode("utf-8")
+            except UnicodeEncodeError as exc:
+                raise ValueError("Validation content must contain valid Unicode") from exc
+            if len(content_bytes) > MAX_VALIDATION_BYTES:
                 raise ValueError(f"Validation content exceeds {MAX_VALIDATION_BYTES} bytes")
             source = content
         else:
@@ -80,11 +86,65 @@ class ProjectValidation:
                 "valid": False,
                 "error": {"message": str(exc), "line": None, "column": None},
             }
+        except RecursionError:
+            return {
+                "path": file["path"],
+                "language": language,
+                "valid": False,
+                "error": {
+                    "message": "Nesting is too deep for safe static validation",
+                    "line": None,
+                    "column": None,
+                },
+            }
         return {
             "path": file["path"],
             "language": language,
             "valid": True,
             "error": None,
+        }
+
+    def validate_project(self) -> dict:
+        inventory = self.list_files()
+        results = []
+        skipped = []
+        for file in inventory["files"]:
+            suffix = Path(file["path"]).suffix.lower()
+            if suffix not in VALIDATORS:
+                continue
+            if file["bytes"] > MAX_VALIDATION_BYTES:
+                skipped.append({
+                    "path": file["path"],
+                    "reason": f"File exceeds {MAX_VALIDATION_BYTES} byte validation limit",
+                })
+                continue
+            try:
+                results.append(self.validate(file["path"]))
+            except (OSError, ValueError) as exc:
+                skipped.append({"path": file["path"], "reason": str(exc)[:300]})
+
+        valid_count = sum(result["valid"] for result in results)
+        invalid_count = len(results) - valid_count
+        diagnostics = [
+            result for result in results if not result["valid"]
+        ] + [
+            {"path": file["path"], "language": None, "valid": False, "error": {
+                "message": "Skipped: " + file["reason"],
+                "line": None,
+                "column": None,
+            }}
+            for file in skipped
+        ]
+        return {
+            "results": diagnostics[:MAX_PROJECT_DIAGNOSTICS],
+            "truncated": len(diagnostics) > MAX_PROJECT_DIAGNOSTICS,
+            "warnings": inventory["warnings"],
+            "summary": {
+                "checked": len(results),
+                "valid": valid_count,
+                "invalid": invalid_count,
+                "skipped": len(skipped),
+            },
         }
 
     @staticmethod

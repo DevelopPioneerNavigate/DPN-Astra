@@ -167,6 +167,31 @@ class RepositoryContextTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "supports Python, JSON, and TOML"):
             RepositoryContext(self.root).validation.validate("script.sh")
 
+    def test_project_validation_summarizes_supported_files_and_limits(self):
+        (self.root / "good.py").write_text("answer = 42\n", encoding="utf-8")
+        (self.root / "bad.json").write_text('{"answer": NaN}\n', encoding="utf-8")
+        (self.root / "large.toml").write_text("value = '" + ("x" * (25 * 1024)) + "'\n", encoding="utf-8")
+        report = RepositoryContext(self.root).validation.validate_project()
+
+        self.assertEqual(
+            {"checked": 2, "valid": 1, "invalid": 1, "skipped": 1},
+            report["summary"],
+        )
+        self.assertFalse(report["truncated"])
+        diagnostics = {result["path"]: result for result in report["results"]}
+        self.assertEqual(["bad.json", "large.toml"], sorted(diagnostics))
+        self.assertIn("Non-standard JSON", diagnostics["bad.json"]["error"]["message"])
+        self.assertIn("validation limit", diagnostics["large.toml"]["error"]["message"])
+
+    def test_project_validation_bounds_returned_diagnostics(self):
+        for index in range(105):
+            (self.root / f"invalid_{index:03}.json").write_text("{", encoding="utf-8")
+        report = RepositoryContext(self.root).validation.validate_project()
+
+        self.assertEqual(105, report["summary"]["invalid"])
+        self.assertEqual(100, len(report["results"]))
+        self.assertTrue(report["truncated"])
+
 
 class ProjectApiTests(unittest.TestCase):
     def setUp(self):
@@ -284,6 +309,16 @@ class ProjectApiTests(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertFalse(result["validation"]["valid"])
         self.assertEqual(1, result["validation"]["error"]["line"])
+
+    def test_project_validation_http_endpoint(self):
+        (self.root / "valid.toml").write_text("[runtime]\nworkers = 2\n", encoding="utf-8")
+        (self.root / "invalid.json").write_text("{", encoding="utf-8")
+        status, result = self.post_json("/api/project/validate-all", {})
+
+        self.assertEqual(200, status)
+        self.assertEqual(2, result["validation"]["summary"]["valid"])
+        self.assertEqual(1, result["validation"]["summary"]["invalid"])
+        self.assertEqual("invalid.json", result["validation"]["results"][0]["path"])
 
 
 class ProjectChangesTests(unittest.TestCase):

@@ -69,6 +69,9 @@
             <input id="project-search-input" maxlength="200" placeholder="Search source and configuration">
             <button class="ghost" type="submit">Search</button>
           </form>
+          <button id="project-validate-all" class="ghost" type="button">Validate project syntax</button>
+          <p id="project-validation-summary" class="notice" aria-live="polite">Checks eligible Python, JSON, and TOML files without executing project code.</p>
+          <ul id="project-validation-results" class="memorylist" aria-live="polite"></ul>
           <p id="project-search-status" class="notice">Source search is read-only. Any file change requires a reviewed diff and separate confirmation. Commands are never executed.</p>
           <div id="project-search-results" class="memorylist" aria-live="polite"></div>
           <section class="change-workbench">

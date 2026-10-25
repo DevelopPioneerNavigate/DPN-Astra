@@ -55,7 +55,7 @@ class RepositoryContext:
         from .project_validation import ProjectValidation
 
         self.changes = ProjectChanges(self.root, self.permissions)
-        self.validation = ProjectValidation(self.changes)
+        self.validation = ProjectValidation(self.changes, self.files)
 
     def context_for(self, query: str) -> str:
         result = self.search(query)
