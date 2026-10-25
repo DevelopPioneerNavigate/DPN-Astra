@@ -125,6 +125,15 @@ def make_handler(core: AstraCore):
                         return
                     proposal = core.repository.changes.propose(body.get("path"), body.get("content"))
                     self._send(201, {"proposal": proposal})
+                elif path == "/api/project/validate":
+                    if core.repository is None:
+                        self._send(404, {"error": "Read-only project context is not enabled"})
+                        return
+                    result = core.repository.validation.validate(
+                        body.get("path"),
+                        content=body.get("content"),
+                    )
+                    self._send(200, {"validation": result})
                 elif path.startswith("/api/project/proposals/"):
                     if core.repository is None:
                         self._send(404, {"error": "Read-only project context is not enabled"})

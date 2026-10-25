@@ -78,6 +78,8 @@
               <input id="project-file-path" maxlength="240" placeholder="Existing relative file path (e.g. src/core.py)" required>
               <button class="ghost" type="submit">Load</button>
             </form>
+            <button id="project-validate" class="ghost" type="button" disabled>Static syntax check</button>
+            <p id="project-validation-status" class="notice" aria-live="polite">Python, JSON, and TOML syntax checks do not execute project code.</p>
             <label class="visuallyhidden" for="project-file-content">Proposed file content</label>
             <textarea id="project-file-content" maxlength="24576" rows="10" spellcheck="false" placeholder="Load an existing UTF-8 project file to review or edit it. Changes are not written until you review the diff and confirm Apply." disabled></textarea>
             <button id="project-propose" class="ghost" type="button" disabled>Preview change</button>

@@ -12,6 +12,7 @@ from astra.config import Config
 from astra.core import AstraCore
 from astra.permissions import RepositoryPermissions
 from astra.project_changes import ProjectChanges
+from astra.project_validation import ProjectValidation
 from astra.repository import RepositoryContext
 from astra.server import make_handler
 
@@ -124,6 +125,48 @@ class RepositoryContextTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             repository.search("query", limit=7)
 
+    def test_static_validation_checks_supported_formats(self):
+        (self.root / "valid.py").write_text("value = 42\n", encoding="utf-8")
+        (self.root / "invalid.py").write_text("def broken(:\n", encoding="utf-8")
+        (self.root / "valid.json").write_text('{"enabled": true}\n', encoding="utf-8")
+        (self.root / "invalid.json").write_text('{"enabled": NaN}\n', encoding="utf-8")
+        (self.root / "valid.toml").write_text("[service]\nport = 8766\n", encoding="utf-8")
+        (self.root / "invalid.toml").write_text("[service\nport = 8766\n", encoding="utf-8")
+        validation = RepositoryContext(self.root).validation
+
+        self.assertTrue(validation.validate("valid.py")["valid"])
+        self.assertFalse(validation.validate("invalid.py")["valid"])
+        self.assertTrue(validation.validate("valid.json")["valid"])
+        self.assertFalse(validation.validate("invalid.json")["valid"])
+        self.assertTrue(validation.validate("valid.toml")["valid"])
+        self.assertFalse(validation.validate("invalid.toml")["valid"])
+
+    def test_static_validation_does_not_execute_python_source(self):
+        marker = self.root / "executed.txt"
+        (self.root / "side_effect.py").write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n",
+            encoding="utf-8",
+        )
+
+        result = RepositoryContext(self.root).validation.validate("side_effect.py")
+
+        self.assertTrue(result["valid"])
+        self.assertFalse(marker.exists())
+
+    def test_static_validation_checks_staged_text_not_only_disk_contents(self):
+        (self.root / "staged.py").write_text("value = 42\n", encoding="utf-8")
+        result = RepositoryContext(self.root).validation.validate(
+            "staged.py",
+            content="def broken(:\n",
+        )
+        self.assertFalse(result["valid"])
+        self.assertEqual(1, result["error"]["line"])
+
+    def test_static_validation_rejects_unsupported_formats(self):
+        (self.root / "script.sh").write_text("echo unsafe\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "supports Python, JSON, and TOML"):
+            RepositoryContext(self.root).validation.validate("script.sh")
+
 
 class ProjectApiTests(unittest.TestCase):
     def setUp(self):
@@ -231,6 +274,16 @@ class ProjectApiTests(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertEqual("rolled_back", result["proposal"]["state"])
         self.assertEqual(original, path.read_bytes())
+
+    def test_static_validation_http_endpoint(self):
+        (self.root / "syntax.py").write_text("value = 1\n", encoding="utf-8")
+        status, result = self.post_json("/api/project/validate", {
+            "path": "syntax.py",
+            "content": "def broken(:\n",
+        })
+        self.assertEqual(200, status)
+        self.assertFalse(result["validation"]["valid"])
+        self.assertEqual(1, result["validation"]["error"]["line"])
 
 
 class ProjectChangesTests(unittest.TestCase):

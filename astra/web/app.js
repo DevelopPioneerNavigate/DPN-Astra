@@ -179,6 +179,7 @@
       $("project-file-content").value = file.content;
       $("project-file-content").disabled = false;
       $("project-propose").disabled = false;
+      $("project-validate").disabled = false;
       stagedChange = null;
       $("project-change-diff").textContent = "";
       $("project-apply").hidden = true;
@@ -212,6 +213,32 @@
       status.textContent = "Change preview failed: " + (error.message || String(error));
     } finally {
       $("project-propose").disabled = false;
+    }
+  });
+
+  $("project-validate").addEventListener("click", async () => {
+    const status = $("project-validation-status");
+    $("project-validate").disabled = true;
+    status.textContent = "Checking syntax without executing project code…";
+    try {
+      const response = await api("/api/project/validate", {
+        method: "POST",
+        body: JSON.stringify({
+          path: $("project-file-path").value.trim(),
+          content: $("project-file-content").value
+        })
+      });
+      const result = response.validation;
+      if (result.valid) {
+        status.textContent = result.language + " syntax valid: " + result.path;
+      } else {
+        const location = result.error.line ? " at " + result.error.line + ":" + result.error.column : "";
+        status.textContent = result.language + " syntax error" + location + ": " + result.error.message;
+      }
+    } catch (error) {
+      status.textContent = "Static validation failed: " + (error.message || String(error));
+    } finally {
+      $("project-validate").disabled = false;
     }
   });
 

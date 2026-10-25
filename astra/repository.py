@@ -52,8 +52,10 @@ class RepositoryContext:
         self.permissions = permissions or RepositoryPermissions(read=True)
         self.permissions.require_read()
         from .project_changes import ProjectChanges
+        from .project_validation import ProjectValidation
 
         self.changes = ProjectChanges(self.root, self.permissions)
+        self.validation = ProjectValidation(self.changes)
 
     def context_for(self, query: str) -> str:
         result = self.search(query)
