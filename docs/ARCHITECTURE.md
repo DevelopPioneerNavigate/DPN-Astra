@@ -1,0 +1,41 @@
+# DPN ASTRA — Engineering Architecture (Genesis)
+
+**Creative reference:** *The Diesel Paradox* series bible, Canon V3.1, where ASTRA is an autonomous fictional intelligence whose relationship with Dr. Aaron Diesel includes genuine love, judgment, boundaries, research partnership, and dry humor. These are narrative requirements, not verifiable properties of real software.
+
+## System topology
+
+```mermaid
+flowchart LR
+  Operator[Local operator] --> Presence[PRESENCE: local web + optional browser voice]
+  Presence --> API[Loopback HTTP API]
+  API --> Core[CORE: persona and conversation]
+  Core --> Ollama[Ollama: local LLM]
+  Core --> Archive[ARCHIVE: consented SQLite memory]
+  API -. blocked .-> Command[COMMAND: denied]
+  API -. unavailable .-> Sense[SENSE: unconnected]
+  API -. unavailable .-> Watch[WATCH: unconnected]
+  API -. planned .-> Continuity[CONTINUITY: encrypted recovery]
+```
+
+## Seven-system engineering contract
+
+1. **CORE**: model-agnostic conversational kernel; v0.1 Ollama adapter and role-separated prompt. Any future planner must separate generation from action approval.
+2. **SENSE**: versioned, signed, read-only instrument drivers, calibration metadata, sensor provenance, monotonic timestamps, and fault states. Nothing is connected in v0.1.
+3. **COMMAND**: capability-scoped permission broker with explicit approval, dry-run preview, asset allowlists, audit trails, emergency independent mechanical interlocks, and revocation. In v0.1 all requests are denied.
+4. **WATCH**: authorized ingest from DPN WatchTower/ECS/NOC only after authentication, data minimization, and alert acceptance criteria. No fictional telemetry.
+5. **ARCHIVE**: user-visible memory capture, granular removal, provenance and retention policy. In v0.1 explicit notes only, plain SQLite on the host.
+6. **CONTINUITY**: encrypted snapshots, signed manifests, restores tested against versioned schema, and eventually offline redundancies. Not implemented in v0.1.
+7. **PRESENCE**: DPN black/red command console, silver/violet/red holographic motif, chat and optional browser-based voice. No claimed physical hologram.
+
+## Operational invariants
+
+- The AI model is not a source of truth about hardware state. Telemetry must come from authenticated sensors.
+- Physical stop circuits and hardware safety remain independent of model output.
+- The assistant cannot trigger an external mutation without distinct human authorization and a scoped actuator.
+- A successful model output is not a successful operation; evidence must verify actions.
+- Research claims are labeled as demonstrated, hypothetical, or fictional. Quantum entanglement does not provide faster-than-light messaging; no PhaseGate matter teleportation is asserted.
+- Personal warmth and character inspiration must not lead to misleading consciousness or relationship claims.
+
+## Implementation reality
+
+This is a single-user localhost prototype, not a remote multi-tenant service. Session conversations are RAM-only, unencrypted SQLite is used only for intentionally saved facts, and model inference runs via an operator-managed Ollama instance. The web API does not run tools. No production readiness or external integration is claimed.
