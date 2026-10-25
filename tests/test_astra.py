@@ -71,5 +71,24 @@ class AstraTests(unittest.TestCase):
                 Config.from_env()
 
 
+    def test_ollama_latest_tag_is_recognized(self):
+        from astra.provider import OllamaProvider
+        from unittest.mock import patch
+        from io import BytesIO
+
+        class FakeResponse:
+            def __enter__(self):
+                return BytesIO(b'{"models":[{"name":"llama3.2:latest"}]}')
+            def __exit__(self, *args):
+                return False
+
+        provider = OllamaProvider("http://127.0.0.1:11434", "llama3.2")
+        with patch("astra.provider.urlopen", return_value=FakeResponse()):
+            result = provider.health()
+        self.assertTrue(result["connected"])
+        self.assertTrue(result["model_installed"])
+
+
+
 if __name__ == "__main__":
     unittest.main()
