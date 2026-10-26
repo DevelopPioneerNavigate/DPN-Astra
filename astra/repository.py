@@ -545,14 +545,43 @@ class RepositoryContext:
                         module_name = ast.literal_eval(node.args[0])
                     except (ValueError, TypeError):
                         module_name = None
-                    if isinstance(module_name, str) and module_name and not module_name.startswith("."):
+                    relative_level = 0
+                    if isinstance(module_name, str) and module_name.startswith("."):
+                        package_node = next(
+                            (keyword.value for keyword in node.keywords if keyword.arg == "package"),
+                            node.args[1] if len(node.args) > 1 else None,
+                        )
+                        try:
+                            package_name = ast.literal_eval(package_node)
+                        except (ValueError, TypeError):
+                            package_name = None
+                        if (
+                            name == "importlib.import_module"
+                            and isinstance(package_name, str)
+                            and package_name
+                            and all(part.isidentifier() for part in package_name.split("."))
+                        ):
+                            relative_level = len(module_name) - len(module_name.lstrip("."))
+                            package_parts = package_name.split(".")
+                            if relative_level <= len(package_parts):
+                                module_parts = module_name.lstrip(".").split(".")
+                                module_name = ".".join(
+                                    package_parts[:len(package_parts) - relative_level + 1]
+                                    + ([part for part in module_parts if part] if module_parts != [""] else [])
+                                )
+                                relative_level = 0
+                            else:
+                                module_name = ""
+                    if isinstance(module_name, str) and module_name and (
+                        not module_name.startswith(".") or relative_level
+                    ):
                         self._record_import(
-                            module_name,
+                            module_name if not relative_level else "." * relative_level + module_name,
                             None,
                             node.lineno,
                             module_name=module_name,
                             member_name=None,
-                            relative_level=0,
+                            relative_level=relative_level,
                             import_end_column=node.end_col_offset,
                             dynamic=True,
                         )

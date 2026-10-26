@@ -567,6 +567,37 @@ class RepositoryContextTests(unittest.TestCase):
         )
         self.assertEqual([], report["issues"])
 
+    def test_dependency_inventory_resolves_literal_relative_importlib_loads(self):
+        package = self.root / "pkg"
+        (package / "sub").mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "sub" / "__init__.py").write_text("", encoding="utf-8")
+        (package / "sub" / "helper.py").write_text("value = 1\n", encoding="utf-8")
+        (package / "utils.py").write_text("value = 2\n", encoding="utf-8")
+        (self.root / "dynamic_loader.py").write_text(
+            'import importlib\n'
+            'importlib.import_module(".helper", package="pkg.sub")\n'
+            'importlib.import_module("..utils", "pkg.sub")\n'
+            'importlib.import_module(".helper")\n'
+            '__import__(".helper")\n',
+            encoding="utf-8",
+        )
+
+        report = RepositoryContext(self.root).dependencies()
+
+        self.assertEqual(
+            [
+                ("pkg.sub.helper", "local", "pkg/sub/helper.py"),
+                ("pkg.utils", "local", "pkg/utils.py"),
+            ],
+            [
+                (item["imported_name"], item["status"], item["resolved_path"])
+                for item in report["imports"]
+                if item["dynamic"]
+            ],
+        )
+        self.assertEqual(2, report["summary"]["dynamic_imports"])
+
     def test_dependency_inventory_caps_imports_and_surfaces_warning(self):
         (self.root / "many_imports.py").write_text(
             "import alpha\nimport beta\n",
