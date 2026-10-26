@@ -265,8 +265,11 @@
           const target = document.createElement("button");
           target.className = "ghost";
           target.type = "button";
-          target.textContent = "Open local target " + imported.resolved_path +
-            ":" + imported.resolved_line;
+          target.textContent = "Open local " +
+            (imported.resolved_kind === "module"
+              ? "module"
+              : imported.resolved_kind + " definition") +
+            " " + imported.resolved_path + ":" + imported.resolved_line;
           target.addEventListener("click", () => {
             openProjectLocation(imported.resolved_path, imported.resolved_line).catch(error => {
               status.textContent = "Could not open local import target: " + (error.message || String(error));

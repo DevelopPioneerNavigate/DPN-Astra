@@ -163,6 +163,7 @@ class RepositoryContextTests(unittest.TestCase):
                 "score": 3,
                 "resolved_path": None,
                 "resolved_line": None,
+                "resolved_kind": None,
             },
             direct["imports"][0],
         )
@@ -178,6 +179,7 @@ class RepositoryContextTests(unittest.TestCase):
                 "score": 3,
                 "resolved_path": None,
                 "resolved_line": None,
+                "resolved_kind": None,
             },
             relative["imports"][0],
         )
@@ -187,6 +189,7 @@ class RepositoryContextTests(unittest.TestCase):
         package.mkdir()
         (package / "__init__.py").write_text("", encoding="utf-8")
         (package / "tasks.py").write_text(
+            "# Local task module\n"
             "def dispatch_job():\n"
             "    return 'ready'\n",
             encoding="utf-8",
@@ -197,13 +200,45 @@ class RepositoryContextTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        imported_symbol = RepositoryContext(self.root).search("dispatch_job")["imports"][0]
-        imported_module = RepositoryContext(self.root).search("tasks")["imports"][0]
+        dispatch_results = RepositoryContext(self.root).search("dispatch_job")["imports"]
+        imported_symbol = next(
+            record for record in dispatch_results
+            if record["imported_name"] == ".tasks.dispatch_job"
+        )
+        task_results = RepositoryContext(self.root).search("tasks")["imports"]
+        imported_module = next(
+            record for record in task_results
+            if record["imported_name"] == "package.tasks"
+        )
 
         self.assertEqual("package/tasks.py", imported_symbol["resolved_path"])
-        self.assertEqual(1, imported_symbol["resolved_line"])
+        self.assertEqual(2, imported_symbol["resolved_line"])
+        self.assertEqual("function", imported_symbol["resolved_kind"])
         self.assertEqual("package/tasks.py", imported_module["resolved_path"])
         self.assertEqual(1, imported_module["resolved_line"])
+        self.assertEqual("module", imported_module["resolved_kind"])
+
+    def test_local_import_resolution_does_not_match_nested_non_exports(self):
+        package = self.root / "package"
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "tasks.py").write_text(
+            "def outer():\n"
+            "    def hidden_export():\n"
+            "        return None\n"
+            "    return hidden_export\n",
+            encoding="utf-8",
+        )
+        (package / "consumer.py").write_text(
+            "from .tasks import hidden_export\n",
+            encoding="utf-8",
+        )
+
+        imported = RepositoryContext(self.root).search("hidden_export")["imports"][0]
+
+        self.assertEqual("package/tasks.py", imported["resolved_path"])
+        self.assertEqual(1, imported["resolved_line"])
+        self.assertEqual("module", imported["resolved_kind"])
 
     def test_python_ast_node_limit_skips_analysis_with_warning(self):
         (self.root / "large_ast.py").write_text(

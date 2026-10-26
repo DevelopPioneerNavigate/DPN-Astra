@@ -406,11 +406,12 @@ class RepositoryContext:
         for record in imports:
             result = {key: value for key, value in record.items() if not key.startswith("_")}
             path_parts = PurePosixPath(record["path"]).parent.parts
-            package_parts = list(path_parts)
             level = record["_relative_level"]
+            package_parts = list(path_parts) if level else []
             if level > len(package_parts):
                 result["resolved_path"] = None
                 result["resolved_line"] = None
+                result["resolved_kind"] = None
                 resolved.append(result)
                 continue
             if level:
@@ -431,36 +432,47 @@ class RepositoryContext:
                 if target_path is None:
                     continue
                 result["resolved_path"] = target_path
-                result["resolved_line"] = (
-                    RepositoryContext._find_python_name_line(contents[target_path], member)
-                    if member
-                    else 1
-                )
+                if member:
+                    definition = RepositoryContext._find_module_export(
+                        contents[target_path], member
+                    )
+                else:
+                    definition = None
+                if definition is not None:
+                    result["resolved_line"] = definition["line"]
+                    result["resolved_kind"] = definition["kind"]
+                else:
+                    result["resolved_line"] = 1
+                    result["resolved_kind"] = "module"
                 break
             else:
                 result["resolved_path"] = None
                 result["resolved_line"] = None
+                result["resolved_kind"] = None
             resolved.append(result)
         return resolved
 
     @staticmethod
-    def _find_python_name_line(content: str, name: str) -> int:
+    def _find_module_export(content: str, name: str) -> dict | None:
         try:
             tree = ast.parse(content)
         except (SyntaxError, RecursionError, ValueError):
-            return 1
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-                return node.lineno
-            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            return None
+
+        for node in tree.body:
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.name == name:
+                    kind = "class" if isinstance(node, ast.ClassDef) else "function"
+                    return {"line": node.lineno, "kind": kind}
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 for target in targets:
                     if any(
                         isinstance(child, ast.Name) and child.id == name
                         for child in ast.walk(target)
                     ):
-                        return node.lineno
-        return 1
+                        return {"line": node.lineno, "kind": "variable"}
+        return None
 
     def _read_documents(self):
         documents = []
