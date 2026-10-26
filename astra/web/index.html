@@ -92,6 +92,12 @@
               <button id="project-apply" class="primary" type="button" hidden>Apply reviewed change</button>
               <button id="project-rollback" class="ghost" type="button" hidden>Rollback applied change</button>
             </div>
+            <div class="change-history-head">
+              <span class="eyebrow">CHANGE HISTORY / CURRENT PROCESS</span>
+              <button id="project-history-refresh" class="ghost" type="button">Refresh</button>
+            </div>
+            <p id="project-history-status" class="notice">Change history is temporary and clears when ASTRA exits.</p>
+            <ul id="project-change-history" class="memorylist" aria-live="polite"></ul>
           </section>
         </details>
         <div class="composer">

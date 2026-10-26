@@ -61,6 +61,29 @@
       (line ? " at line " + line : "") + ". Editing is staged only.";
   }
 
+  async function refreshProjectHistory() {
+    const status = $("project-history-status");
+    const list = $("project-change-history");
+    status.textContent = "Loading current-process change events…";
+    list.replaceChildren();
+    try {
+      const response = await api("/api/project/changes");
+      for (const event of response.events) {
+        const item = document.createElement("li");
+        item.textContent = new Date(event.timestamp).toLocaleString() + " — " +
+          event.event + " — " + event.path + " — " +
+          event.proposal_id + " — SHA-256 " + event.proposed_sha256;
+        list.append(item);
+      }
+      status.textContent = response.durable
+        ? "Change history loaded."
+        : "Temporary history: " + response.events.length + " event(s); cleared when ASTRA exits.";
+      if (!response.events.length) status.textContent += " No project change events recorded.";
+    } catch (error) {
+      status.textContent = "Could not load project change history: " + (error.message || String(error));
+    }
+  }
+
   async function refreshStatus() {
     try {
       const status = await api("/api/status");
@@ -213,6 +236,12 @@
     }
   });
 
+  $("project-history-refresh").addEventListener("click", refreshProjectHistory);
+  $("project-inspector").addEventListener("toggle", () => {
+    if (!$("project-inspector").open) return;
+    refreshProjectHistory();
+  });
+
   $("project-propose").addEventListener("click", async () => {
     const status = $("project-change-status");
     $("project-propose").disabled = true;
@@ -231,6 +260,7 @@
       status.textContent = (response.validation
         ? response.validation.language + " syntax passed. "
         : "") + "Review the complete diff for " + stagedChange.path + ". No file has been written.";
+      refreshProjectHistory();
     } catch (error) {
       stagedChange = null;
       $("project-change-diff").textContent = "";
@@ -346,6 +376,7 @@
       $("project-apply").hidden = true;
       $("project-rollback").hidden = false;
       $("project-change-status").textContent = "Applied " + proposal.path + ". Rollback remains available until ASTRA restarts or this proposal expires.";
+      refreshProjectHistory();
       try {
         const file = await api("/api/project/file?path=" + encodeURIComponent(proposal.path));
         $("project-file-content").value = file.content;
@@ -372,6 +403,7 @@
       rollbackChange = null;
       $("project-rollback").hidden = true;
       $("project-change-status").textContent = "Rolled back " + proposal.path + " to its exact reviewed original bytes.";
+      refreshProjectHistory();
       try {
         const file = await api("/api/project/file?path=" + encodeURIComponent(proposal.path));
         $("project-file-content").value = file.content;

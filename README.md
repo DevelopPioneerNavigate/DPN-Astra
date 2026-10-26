@@ -67,6 +67,8 @@ When `ASTRA_PROJECT_DIR` is set, each chat request searches a bounded set of sou
 
 If a model is missing or Ollama is stopped, ASTRA reports the real error; it never fabricates a model response.
 
+Project changes also have a capped, in-memory lifecycle history (staged, applied, rolled back, expired). It stores paths, proposal IDs, timestamps, and hashes, never source contents. The log is cleared on restart and is not durable or tamper-resistant auditing.
+
 ## Privacy & safety
 
 - Console listens only on `127.0.0.1`. Restrictive Host/Origin and response headers are enforced.

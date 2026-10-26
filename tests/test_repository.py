@@ -1,11 +1,12 @@
 import tempfile
 import unittest
 from http.client import HTTPConnection
+from datetime import timedelta
+from http.server import ThreadingHTTPServer
 import json
 from pathlib import Path
 from threading import Thread
-from unittest.mock import Mock
-from http.server import ThreadingHTTPServer
+from unittest.mock import Mock, patch
 
 from astra.archive import Archive
 from astra.config import Config
@@ -320,6 +321,37 @@ class ProjectApiTests(unittest.TestCase):
         self.assertEqual("rolled_back", result["proposal"]["state"])
         self.assertEqual(original, path.read_bytes())
 
+    def test_project_change_history_http_endpoint(self):
+        status, staged = self.post_json("/api/project/proposals", {
+            "path": "engine.py",
+            "content": "def dispatch_job():\n    return 'audited'\n",
+        })
+        self.assertEqual(201, status)
+        proposal = staged["proposal"]
+        self.post_json(
+            f"/api/project/proposals/{proposal['id']}/apply",
+            {"confirm": True},
+        )
+        status, history = self.get_json("/api/project/changes")
+        self.assertEqual(200, status)
+        self.assertFalse(history["durable"])
+        self.assertEqual(["staged", "applied"], [event["event"] for event in history["events"]])
+        self.assertEqual(
+            [proposal["id"], proposal["id"]],
+            [event["proposal_id"] for event in history["events"]],
+        )
+        self.assertNotIn("diff", history["events"][0])
+        status, _ = self.post_json(
+            f"/api/project/proposals/{proposal['id']}/rollback",
+            {"confirm": True},
+        )
+        self.assertEqual(200, status)
+        _, history = self.get_json("/api/project/changes")
+        self.assertEqual(
+            ["staged", "applied", "rolled_back"],
+            [event["event"] for event in history["events"]],
+        )
+
     def test_invalid_syntax_proposal_http_is_rejected_before_staging(self):
         path = self.root / "engine.py"
         original = path.read_bytes()
@@ -397,6 +429,42 @@ class ProjectChangesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "changed since review"):
             self.changes.rollback(proposal["id"], confirmed=True)
         self.assertEqual(b"value = 6\n", self.target.read_bytes())
+
+    def test_audit_log_records_lifecycle_without_source_contents(self):
+        proposal = self.changes.propose("sample.py", "value = 'sensitive'\n")
+        self.changes.apply(proposal["id"], confirmed=True)
+        self.changes.rollback(proposal["id"], confirmed=True)
+
+        events = self.changes.audit_log()
+
+        self.assertEqual(
+            ["staged", "applied", "rolled_back"],
+            [event["event"] for event in events],
+        )
+        self.assertTrue(all(event["path"] == "sample.py" for event in events))
+        self.assertTrue(all(event["proposal_id"] == proposal["id"] for event in events))
+        self.assertTrue(all("timestamp" in event for event in events))
+        self.assertNotIn("sensitive", repr(events))
+
+    def test_audit_log_records_expired_proposal(self):
+        with patch("astra.project_changes.PROPOSAL_LIFETIME", timedelta(days=-1)):
+            proposal = self.changes.propose("sample.py", "value = 7\n")
+            events = self.changes.audit_log()
+
+        self.assertEqual(["staged", "expired"], [event["event"] for event in events])
+        with self.assertRaisesRegex(ValueError, "expired"):
+            self.changes.apply(proposal["id"], confirmed=True)
+
+    def test_audit_history_keeps_only_the_configured_event_limit(self):
+        with patch("astra.project_changes.MAX_AUDIT_EVENTS", 2):
+            for value in (2, 3):
+                proposal = self.changes.propose("sample.py", f"value = {value}\n")
+                self.changes.apply(proposal["id"], confirmed=True)
+                self.changes.rollback(proposal["id"], confirmed=True)
+
+        events = self.changes.audit_log()
+        self.assertEqual(2, len(events))
+        self.assertEqual(["applied", "rolled_back"], [event["event"] for event in events])
 
     def test_path_and_file_restrictions(self):
         with self.assertRaises(ValueError):

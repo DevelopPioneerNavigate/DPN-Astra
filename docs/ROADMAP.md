@@ -12,7 +12,7 @@
 - Encrypted memory at rest with export, full deletion, retention limits, and opt-in RAG.
 - Separate facts, hypotheses, source citations, lab notes, and code evidence.
 - Real tests for HTTP layer, malformed requests, and storage lifecycle.
-- **In progress:** opt-in bounded repository retrieval grounds model prompts in local source excerpts with relative-path and line-number citations. A file index, ranked search, reviewable one-file change proposals, explicit per-operation apply/rollback, non-executing Python/JSON/TOML syntax checks (per-file and project-wide), and clickable source-linked diagnostics are available. Project tests and builds are not executed: a sandbox is still required. This remains a user-directed prototype, not an autonomous multi-file coding engine or sandboxed test runner.
+- **In progress:** opt-in bounded repository retrieval grounds model prompts in local source excerpts with relative-path and line-number citations. A file index, ranked search, reviewable one-file change proposals, explicit per-operation apply/rollback, capped temporary change history, non-executing Python/JSON/TOML syntax checks (per-file and project-wide), and clickable source-linked diagnostics are available. Project tests and builds are not executed: a sandbox is still required. This remains a user-directed prototype, not an autonomous multi-file coding engine or sandboxed test runner.
 
 ## v0.3 — ASTRA PRESENCE
 - Dedicated Windows desktop wrapper and audio pipeline with explicit microphone controls.

@@ -16,6 +16,7 @@ from .repository import SENSITIVE_NAME_PARTS, SUPPORTED_SUFFIXES, SPECIAL_FILES
 
 MAX_CHANGE_BYTES = 24 * 1024
 MAX_PENDING_PROPOSALS = 20
+MAX_AUDIT_EVENTS = 100
 PROPOSAL_LIFETIME = timedelta(minutes=15)
 
 
@@ -42,6 +43,7 @@ class ProjectChanges:
         self.permissions = permissions or RepositoryPermissions(read=True)
         self.permissions.require_read()
         self._proposals: dict[str, Proposal] = {}
+        self._audit_events: list[dict] = []
         self._lock = RLock()
 
     def read_file(self, relative_path: str) -> dict:
@@ -95,6 +97,7 @@ class ProjectChanges:
                 raise ValueError("Too many pending project changes; restart ASTRA to clear them")
             proposal_id = secrets.token_urlsafe(24)
             self._proposals[proposal_id] = proposal
+            self._record_event("staged", proposal_id, proposal)
         return self._describe(proposal_id, proposal)
 
     def apply(self, proposal_id: str, confirmed=False) -> dict:
@@ -106,6 +109,7 @@ class ProjectChanges:
             self._assert_unchanged(proposal, proposal.original_hash)
             self._atomic_replace(proposal.target, proposal.replacement)
             proposal.state = "applied"
+            self._record_event("applied", proposal_id, proposal)
             return self._describe(proposal_id, proposal)
 
     def rollback(self, proposal_id: str, confirmed=False) -> dict:
@@ -117,7 +121,13 @@ class ProjectChanges:
             self._assert_unchanged(proposal, proposal.replacement_hash)
             self._atomic_replace(proposal.target, proposal.original)
             proposal.state = "rolled_back"
+            self._record_event("rolled_back", proposal_id, proposal)
             return self._describe(proposal_id, proposal)
+
+    def audit_log(self) -> list[dict]:
+        with self._lock:
+            self._expire_proposals()
+            return [dict(event) for event in self._audit_events]
 
     def _resolve_target(self, relative_path: str):
         if not isinstance(relative_path, str) or not relative_path or len(relative_path) > 240:
@@ -212,7 +222,20 @@ class ProjectChanges:
             if proposal.created_at < cutoff
         ]
         for proposal_id in expired:
-            del self._proposals[proposal_id]
+            proposal = self._proposals.pop(proposal_id)
+            self._record_event("expired", proposal_id, proposal)
+
+    def _record_event(self, event: str, proposal_id: str, proposal: Proposal):
+        self._audit_events.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": event,
+            "proposal_id": proposal_id,
+            "path": proposal.path,
+            "state": proposal.state,
+            "original_sha256": proposal.original_hash,
+            "proposed_sha256": proposal.replacement_hash,
+        })
+        del self._audit_events[:-MAX_AUDIT_EVENTS]
 
     @staticmethod
     def _describe(proposal_id: str, proposal: Proposal) -> dict:

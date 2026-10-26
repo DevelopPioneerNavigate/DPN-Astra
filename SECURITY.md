@@ -11,6 +11,8 @@ The language model has no tools, shell commands, network connectors, robotics au
 
 The project workbench permits a user-confirmed one-file change only for an existing, eligible UTF-8 text file under the configured project root. It stages a diff first, checks the original file hash before applying, writes through a same-directory temporary file, and keeps an in-memory original snapshot for guarded rollback. Apply and rollback require separate explicit confirmation; rollback refuses to overwrite intervening changes. Proposal snapshots expire after 15 minutes or when ASTRA exits. This is a local single-user prototype, not authenticated authorization: do not expose it to other users or networks. Supported Python/JSON/TOML proposals must pass bounded static parsing before staging; project-wide validation returns at most 100 diagnostics while counts cover all scanned files. These checks do not establish runtime correctness. No project shell, build, or test command is executed: doing so requires a real sandbox and a separate security review. Browser-based dictation availability and privacy are implementation/browser dependent; it must be used only with user consent. The console renders model, source, and diff text with `textContent`.
 
+The project-change endpoint exposes a capped, process-local lifecycle history for staged, applied, rolled-back, and expired proposals. It records timestamps, paths, proposal IDs, states, and hashes, but not source content. The history is lost when ASTRA exits and is not durable, tamper-resistant security auditing.
+
 ## Required before DPN integration
 - Per-user local authentication and privileged action re-verification.
 - Asset allowlists, role-based controls and explicit human confirmation.

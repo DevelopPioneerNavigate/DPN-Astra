@@ -103,6 +103,14 @@ def make_handler(core: AstraCore):
                     self._send(404, {"error": "Project file was not found"})
                 except ValueError as exc:
                     self._send(400, {"error": str(exc)})
+            elif url.path == "/api/project/changes":
+                if core.repository is None:
+                    self._send(404, {"error": "Read-only project context is not enabled"})
+                    return
+                self._send(200, {
+                    "events": core.repository.changes.audit_log(),
+                    "durable": False,
+                })
             else:
                 self._send(404, {"error": "Not found"})
 
