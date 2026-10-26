@@ -398,6 +398,50 @@ class RepositoryContextTests(unittest.TestCase):
             [issue["imported_name"] for issue in report["issues"]],
         )
 
+    def test_dependency_inventory_detects_missing_local_import_members(self):
+        package = self.root / "package"
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "tasks.py").write_text(
+            "def available():\n    return None\n"
+            "from helpers import reexported\n",
+            encoding="utf-8",
+        )
+        (package / "dynamic.py").write_text(
+            "def __getattr__(name):\n    return None\n",
+            encoding="utf-8",
+        )
+        (package / "helpers.py").write_text(
+            "def reexported():\n    return None\n",
+            encoding="utf-8",
+        )
+        (package / "consumer.py").write_text(
+            "from .tasks import available\n"
+            "from .tasks import missing\n"
+            "from .dynamic import dynamic_name\n"
+            "from .tasks import reexported as exported_name\n"
+            "from . import absent_module\n",
+            encoding="utf-8",
+        )
+
+        report = RepositoryContext(self.root).dependencies()
+
+        self.assertEqual(
+            [
+                (".tasks.missing", "unresolved-relative", "missing-local-target"),
+                (".absent_module", "unresolved-relative", "missing-local-target"),
+            ],
+            [
+                (item["imported_name"], item["status"], item["issue"])
+                for item in report["imports"]
+                if item["issue"] == "missing-local-target"
+            ],
+        )
+        self.assertEqual(
+            3,
+            report["summary"]["local"],
+        )
+
     def test_dependency_inventory_reports_possible_unused_imports_conservatively(self):
         package = self.root / "package"
         package.mkdir()

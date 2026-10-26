@@ -225,11 +225,12 @@ class RepositoryContext:
         imports.sort(key=lambda item: (item["path"], item["line"], item["imported_name"]))
         for item in imports:
             module_name = item.pop("_module_name")
+            member_resolved = item.pop("_member_resolved")
             if item["path"] not in exports_cache:
                 exports_cache[item["path"]] = self._declares_all(
                     contents.get(item["path"], "")
                 )
-            if item["resolved_path"]:
+            if item["resolved_path"] and member_resolved:
                 item["status"] = "local"
                 item["issue"] = None
             elif item["imported_name"].startswith("."):
@@ -497,7 +498,13 @@ class RepositoryContext:
             def visit_ImportFrom(self, node):
                 module = "." * node.level + (node.module or "")
                 for alias in node.names:
-                    imported_name = f"{module}.{alias.name}" if module else alias.name
+                    imported_name = (
+                        f"{module}{alias.name}"
+                        if module.endswith(".")
+                        else f"{module}.{alias.name}"
+                        if module
+                        else alias.name
+                    )
                     self._record_import(
                         imported_name,
                         alias.asname or alias.name,
@@ -568,6 +575,7 @@ class RepositoryContext:
         resolved = []
         for record in imports:
             result = {key: value for key, value in record.items() if not key.startswith("_")}
+            member_resolved = False
             if include_module_name:
                 result["_module_name"] = record["_module_name"]
             result["references"] = RepositoryContext._find_lexical_references(
@@ -584,6 +592,8 @@ class RepositoryContext:
                 result["resolved_path"] = None
                 result["resolved_line"] = None
                 result["resolved_kind"] = None
+                if include_module_name:
+                    result["_member_resolved"] = False
                 resolved.append(result)
                 continue
             if level:
@@ -604,6 +614,8 @@ class RepositoryContext:
                 if target_path is None:
                     continue
                 result["resolved_path"] = target_path
+                if member is None or member == "*" or candidate != candidates[-1]:
+                    member_resolved = True
                 if member:
                     definition = RepositoryContext._find_module_export(
                         contents[target_path], member
@@ -613,7 +625,12 @@ class RepositoryContext:
                 if definition is not None:
                     result["resolved_line"] = definition["line"]
                     result["resolved_kind"] = definition["kind"]
-                else:
+                    member_resolved = True
+                elif member and member != "*" and candidate == candidates[-1]:
+                    member_resolved = RepositoryContext._module_may_export(
+                        contents[target_path], member
+                    )
+                if definition is None:
                     result["resolved_line"] = 1
                     result["resolved_kind"] = "module"
                 break
@@ -621,8 +638,43 @@ class RepositoryContext:
                 result["resolved_path"] = None
                 result["resolved_line"] = None
                 result["resolved_kind"] = None
+            if include_module_name:
+                result["_member_resolved"] = member_resolved
             resolved.append(result)
         return resolved
+
+    @staticmethod
+    def _module_may_export(content: str, name: str) -> bool:
+        if RepositoryContext._find_module_export(content, name) is not None:
+            return True
+        try:
+            tree = ast.parse(content)
+        except (SyntaxError, RecursionError, ValueError):
+            return True
+
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "__getattr__":
+                return True
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if any(
+                    isinstance(target, ast.Name) and target.id == "__all__"
+                    for target in targets
+                ):
+                    return True
+            if isinstance(node, ast.ImportFrom):
+                if any(
+                    (alias.asname or alias.name) == name
+                    for alias in node.names
+                ):
+                    return True
+            if isinstance(node, ast.Import):
+                if any(
+                    (alias.asname or alias.name.split(".", 1)[0]) == name
+                    for alias in node.names
+                ):
+                    return True
+        return False
 
     @staticmethod
     def _find_lexical_references(
