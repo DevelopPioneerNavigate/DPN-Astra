@@ -165,6 +165,7 @@ class RepositoryContextTests(unittest.TestCase):
                 "scope": None,
                 "line": 1,
                 "score": 3,
+                "wildcard": False,
                 "resolved_path": None,
                 "resolved_line": None,
                 "resolved_kind": None,
@@ -186,6 +187,7 @@ class RepositoryContextTests(unittest.TestCase):
                 "scope": None,
                 "line": 2,
                 "score": 3,
+                "wildcard": False,
                 "resolved_path": None,
                 "resolved_line": None,
                 "resolved_kind": None,
@@ -331,6 +333,37 @@ class RepositoryContextTests(unittest.TestCase):
                 for item in imports
             ],
         )
+
+    def test_dependency_inventory_includes_wildcard_imports(self):
+        package = self.root / "package"
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "exports.py").write_text("VALUE = 1\n", encoding="utf-8")
+        (package / "consumer.py").write_text(
+            "from .exports import *\n"
+            "from external_lib import *\n",
+            encoding="utf-8",
+        )
+
+        report = RepositoryContext(self.root).dependencies()
+
+        self.assertEqual(
+            [
+                (".exports.*", True, "local", "package/exports.py"),
+                ("external_lib.*", True, "unresolved-absolute", None),
+            ],
+            [
+                (
+                    item["imported_name"],
+                    item["wildcard"],
+                    item["status"],
+                    item["resolved_path"],
+                )
+                for item in report["imports"]
+            ],
+        )
+        search = RepositoryContext(self.root).search("exports")
+        self.assertTrue(search["imports"][0]["wildcard"])
 
     def test_dependency_inventory_caps_imports_and_surfaces_warning(self):
         (self.root / "many_imports.py").write_text(

@@ -329,6 +329,7 @@
         source.type = "button";
         source.textContent = imported.path + ":" + imported.line + " imports " +
           imported.imported_name + " as " + imported.local_name +
+          (imported.wildcard ? " (wildcard)" : "") +
           " [" + imported.status + "]";
         source.addEventListener("click", () => {
           openProjectLocation(imported.path, imported.line).catch(error => {

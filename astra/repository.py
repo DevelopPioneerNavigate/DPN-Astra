@@ -422,8 +422,6 @@ class RepositoryContext:
             def visit_ImportFrom(self, node):
                 module = "." * node.level + (node.module or "")
                 for alias in node.names:
-                    if alias.name == "*":
-                        continue
                     imported_name = f"{module}.{alias.name}" if module else alias.name
                     self._record_import(
                         imported_name,
@@ -453,6 +451,7 @@ class RepositoryContext:
                         "scope": ".".join(scopes) or None,
                         "line": line,
                         "score": score,
+                        "wildcard": member_name == "*",
                         "_module_name": module_name,
                         "_member_name": member_name,
                         "_relative_level": relative_level,
