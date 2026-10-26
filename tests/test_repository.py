@@ -322,7 +322,11 @@ class RepositoryContextTests(unittest.TestCase):
         self.assertEqual(1, report["summary"]["local"])
         self.assertEqual(2, report["summary"]["unresolved"])
         self.assertEqual(
-            [(".missing.unavailable", "missing-local-target")],
+            [
+                (".tasks.dispatch_job", "possibly-unused-import"),
+                ("third_party.client", "possibly-unused-import"),
+                (".missing.unavailable", "missing-local-target"),
+            ],
             [(issue["imported_name"], issue["issue"]) for issue in report["issues"]],
         )
         self.assertFalse(report["summary"]["truncated"])
@@ -381,7 +385,7 @@ class RepositoryContextTests(unittest.TestCase):
 
         self.assertEqual(
             [
-                ("third_party.client", "unresolved-absolute", None),
+                ("third_party.client", "unresolved-absolute", "possibly-unused-import"),
                 ("project_plugin.module", "unresolved-local", "missing-local-target"),
             ],
             [
@@ -390,8 +394,44 @@ class RepositoryContextTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            ["project_plugin.module"],
+            ["third_party.client", "project_plugin.module"],
             [issue["imported_name"] for issue in report["issues"]],
+        )
+
+    def test_dependency_inventory_reports_possible_unused_imports_conservatively(self):
+        package = self.root / "package"
+        package.mkdir()
+        (package / "__init__.py").write_text(
+            "from helpers import exported\n",
+            encoding="utf-8",
+        )
+        (self.root / "helpers.py").write_text(
+            "def exported():\n    return None\n"
+            "def unused():\n    return None\n"
+            "def used():\n    return None\n",
+            encoding="utf-8",
+        )
+        (self.root / "consumer.py").write_text(
+            "from helpers import unused\n"
+            "from helpers import used as used_alias\n"
+            "from helpers import *\n"
+            "used_alias()\n",
+            encoding="utf-8",
+        )
+        (self.root / "exports.py").write_text(
+            "from helpers import exported\n"
+            '__all__ = ["exported"]\n',
+            encoding="utf-8",
+        )
+
+        report = RepositoryContext(self.root).dependencies()
+
+        self.assertEqual(
+            [("consumer.py", "helpers.unused", "possibly-unused-import")],
+            [
+                (issue["path"], issue["imported_name"], issue["issue"])
+                for issue in report["issues"]
+            ],
         )
 
     def test_dependency_inventory_caps_imports_and_surfaces_warning(self):

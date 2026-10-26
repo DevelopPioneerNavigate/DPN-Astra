@@ -369,10 +369,17 @@
         results.append(item);
       }
       const summary = data.summary;
+      const missingCount = data.issues.filter(issue =>
+        issue.issue === "missing-local-target"
+      ).length;
+      const unusedCount = data.issues.filter(issue =>
+        issue.issue === "possibly-unused-import"
+      ).length;
       status.textContent = "Scanned " + summary.files_scanned + " of " +
         summary.eligible_files + " Python file(s); " + summary.local +
         " local and " + summary.unresolved + " unresolved import(s); " +
-        data.issues.length + " likely missing local target(s).";
+        missingCount + " likely missing local target(s), " +
+        unusedCount + " possibly unused import(s).";
       if (summary.truncated) status.textContent += " Results were capped.";
       if (data.warnings.length) status.textContent += " " + data.warnings.join("; ");
       if (!summary.imports_returned) status.textContent += " No imports found.";

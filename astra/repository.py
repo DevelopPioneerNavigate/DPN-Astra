@@ -220,9 +220,15 @@ class RepositoryContext:
         imports = self._resolve_local_imports(
             import_records, documents, include_module_name=True
         )
+        contents = {relative: content for relative, content, _ in python_documents}
+        exports_cache = {}
         imports.sort(key=lambda item: (item["path"], item["line"], item["imported_name"]))
         for item in imports:
             module_name = item.pop("_module_name")
+            if item["path"] not in exports_cache:
+                exports_cache[item["path"]] = self._declares_all(
+                    contents.get(item["path"], "")
+                )
             if item["resolved_path"]:
                 item["status"] = "local"
                 item["issue"] = None
@@ -235,6 +241,16 @@ class RepositoryContext:
             else:
                 item["status"] = "unresolved-absolute"
                 item["issue"] = None
+            if (
+                item["issue"] is None
+                and not item["wildcard"]
+                and item["local_name"] != "*"
+                and not item["local_name"].startswith("_")
+                and not item["path"].endswith("/__init__.py")
+                and not item["references"]
+                and not exports_cache[item["path"]]
+            ):
+                item["issue"] = "possibly-unused-import"
 
         warnings.extend(ast_warnings)
         local_count = sum(item["status"] == "local" for item in imports)
@@ -247,7 +263,11 @@ class RepositoryContext:
                     "line": item["line"],
                     "imported_name": item["imported_name"],
                     "issue": item["issue"],
-                    "message": "Local import target could not be resolved",
+                    "message": (
+                        "Local import target could not be resolved"
+                        if item["issue"] == "missing-local-target"
+                        else "Imported name has no detected lexical uses"
+                    ),
                 }
                 for item in imports
                 if item["issue"]
@@ -262,6 +282,23 @@ class RepositoryContext:
             },
             "warnings": warnings,
         }
+
+    @staticmethod
+    def _declares_all(content: str) -> bool:
+        try:
+            tree = ast.parse(content)
+        except (SyntaxError, RecursionError, ValueError):
+            return True
+        for node in tree.body:
+            targets = []
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(
+                isinstance(target, ast.Name) and target.id == "__all__"
+                for target in targets
+            ):
+                return True
+        return False
 
     @staticmethod
     def _has_local_import_root(module_name: str, documents: list[tuple]) -> bool:
