@@ -205,7 +205,9 @@
       $("project-change-diff").textContent = stagedChange.diff;
       $("project-apply").hidden = false;
       $("project-rollback").hidden = !rollbackChange;
-      status.textContent = "Review the complete diff for " + stagedChange.path + ". No file has been written.";
+      status.textContent = (response.validation
+        ? response.validation.language + " syntax passed. "
+        : "") + "Review the complete diff for " + stagedChange.path + ". No file has been written.";
     } catch (error) {
       stagedChange = null;
       $("project-change-diff").textContent = "";

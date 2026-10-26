@@ -16,6 +16,21 @@ VALIDATORS = {
 }
 
 
+class ProjectSyntaxError(ValueError):
+    def __init__(self, result: dict):
+        self.result = result
+        error = result["error"]
+        location = (
+            f" at {error['line']}:{error['column']}"
+            if error.get("line") is not None
+            else ""
+        )
+        super().__init__(
+            f"{result['language']} syntax invalid for {result['path']}{location}: "
+            f"{error['message']}"
+        )
+
+
 class ProjectValidation:
     def __init__(self, changes: ProjectChanges, list_files):
         self.changes = changes
@@ -146,6 +161,16 @@ class ProjectValidation:
                 "skipped": len(skipped),
             },
         }
+
+    def propose(self, relative_path: str, content: str) -> dict:
+        suffix = Path(relative_path).suffix.lower() if isinstance(relative_path, str) else ""
+        validation = None
+        if suffix in VALIDATORS:
+            validation = self.validate(relative_path, content)
+            if not validation["valid"]:
+                raise ProjectSyntaxError(validation)
+        proposal = self.changes.propose(relative_path, content)
+        return {"proposal": proposal, "validation": validation}
 
     @staticmethod
     def _reject_nonstandard_json(value):

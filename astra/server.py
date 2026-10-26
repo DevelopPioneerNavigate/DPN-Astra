@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from .core import AstraCore
 from .provider import ModelError
+from .project_validation import ProjectSyntaxError
 
 WEB_DIR = Path(__file__).parent / "web"
 ASSETS = {"/": ("index.html", "text/html; charset=utf-8"), "/app.css": ("app.css", "text/css; charset=utf-8"), "/project.css": ("project.css", "text/css; charset=utf-8"), "/app.js": ("app.js", "application/javascript; charset=utf-8")}
@@ -123,8 +124,8 @@ def make_handler(core: AstraCore):
                     if core.repository is None:
                         self._send(404, {"error": "Read-only project context is not enabled"})
                         return
-                    proposal = core.repository.changes.propose(body.get("path"), body.get("content"))
-                    self._send(201, {"proposal": proposal})
+                    result = core.repository.validation.propose(body.get("path"), body.get("content"))
+                    self._send(201, result)
                 elif path == "/api/project/validate":
                     if core.repository is None:
                         self._send(404, {"error": "Read-only project context is not enabled"})
@@ -161,6 +162,8 @@ def make_handler(core: AstraCore):
                     self._send(200, {"proposal": proposal})
                 else:
                     self._send(404, {"error": "Not found"})
+            except ProjectSyntaxError as exc:
+                self._send(422, {"error": str(exc), "validation": exc.result})
             except ValueError as exc:
                 self._send(400, {"error": str(exc)})
             except PermissionError as exc:

@@ -12,7 +12,7 @@ from astra.config import Config
 from astra.core import AstraCore
 from astra.permissions import RepositoryPermissions
 from astra.project_changes import ProjectChanges
-from astra.project_validation import ProjectValidation
+from astra.project_validation import ProjectSyntaxError, ProjectValidation
 from astra.repository import RepositoryContext
 from astra.server import make_handler
 
@@ -167,6 +167,26 @@ class RepositoryContextTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "supports Python, JSON, and TOML"):
             RepositoryContext(self.root).validation.validate("script.sh")
 
+    def test_proposal_requires_valid_syntax_for_supported_file_types(self):
+        (self.root / "candidate.py").write_text("value = 1\n", encoding="utf-8")
+        validation = RepositoryContext(self.root).validation
+
+        with self.assertRaises(ProjectSyntaxError) as raised:
+            validation.propose("candidate.py", "def broken(:\n")
+
+        self.assertEqual("candidate.py", raised.exception.result["path"])
+        self.assertEqual(1, raised.exception.result["error"]["line"])
+        self.assertEqual("value = 1\n", (self.root / "candidate.py").read_text(encoding="utf-8"))
+
+    def test_proposal_returns_syntax_evidence_for_valid_supported_file(self):
+        (self.root / "candidate.json").write_text('{"old": true}\n', encoding="utf-8")
+        result = RepositoryContext(self.root).validation.propose(
+            "candidate.json",
+            '{"new": true}\n',
+        )
+        self.assertTrue(result["validation"]["valid"])
+        self.assertEqual("pending", result["proposal"]["state"])
+
     def test_project_validation_summarizes_supported_files_and_limits(self):
         (self.root / "good.py").write_text("answer = 42\n", encoding="utf-8")
         (self.root / "bad.json").write_text('{"answer": NaN}\n', encoding="utf-8")
@@ -298,6 +318,18 @@ class ProjectApiTests(unittest.TestCase):
         status, result = self.post_json(route, {"confirm": True})
         self.assertEqual(200, status)
         self.assertEqual("rolled_back", result["proposal"]["state"])
+        self.assertEqual(original, path.read_bytes())
+
+    def test_invalid_syntax_proposal_http_is_rejected_before_staging(self):
+        path = self.root / "engine.py"
+        original = path.read_bytes()
+        status, result = self.post_json("/api/project/proposals", {
+            "path": "engine.py",
+            "content": "def broken(:\n",
+        })
+        self.assertEqual(422, status)
+        self.assertEqual("engine.py", result["validation"]["path"])
+        self.assertIn("syntax invalid", result["error"])
         self.assertEqual(original, path.read_bytes())
 
     def test_static_validation_http_endpoint(self):
