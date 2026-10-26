@@ -610,7 +610,8 @@ class RepositoryContextTests(unittest.TestCase):
         (package / "sub" / "helper.py").write_text("value = 1\n", encoding="utf-8")
         (package / "utils.py").write_text("value = 2\n", encoding="utf-8")
         (package / "sub" / "loader.py").write_text(
-            '__import__("helper", globals(), locals(), [], 1)\n'
+            "from builtins import __import__ as relative_load\n"
+            'relative_load(name="helper", globals=globals(), level=1)\n'
             '__import__(name="utils", globals=globals(), level=2)\n'
             '__import__("missing", globals(), locals(), [], 1)\n',
             encoding="utf-8",
