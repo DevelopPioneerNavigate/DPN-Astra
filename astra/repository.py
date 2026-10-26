@@ -1,4 +1,5 @@
 """Bounded, read-only source context for an explicitly selected local project."""
+import ast
 import os
 from collections import Counter
 from pathlib import Path
@@ -45,7 +46,7 @@ SECRET_ASSIGNMENT_RE = re.compile(
 class RepositoryContext:
     """Search source files without executing them or leaving the configured root."""
 
-    def __init__(self, root: Path, permissions=None):
+    def __init__(self, root: Path, permissions=None, audit_path: Path | None = None):
         self.root = Path(root).expanduser().resolve()
         if not self.root.is_dir():
             raise ValueError("ASTRA_PROJECT_DIR must point to a directory")
@@ -54,7 +55,7 @@ class RepositoryContext:
         from .project_changes import ProjectChanges
         from .project_validation import ProjectValidation
 
-        self.changes = ProjectChanges(self.root, self.permissions)
+        self.changes = ProjectChanges(self.root, self.permissions, audit_path=audit_path)
         self.validation = ProjectValidation(self.changes, self.files)
 
     def context_for(self, query: str) -> str:
@@ -109,16 +110,39 @@ class RepositoryContext:
             if len(token) > 1 and token.lower() not in STOP_WORDS
         }
         if not terms:
-            return {"matches": [], "warnings": []}
+            return {
+                "matches": [],
+                "symbols": [],
+                "call_sites": [],
+                "inheritance": [],
+                "imports": [],
+                "warnings": [],
+            }
 
         documents, warnings = self._read_documents()
         ranked = []
+        symbols = []
+        call_sites = []
+        inheritance = []
+        imports = []
         for relative, content, _ in documents:
             token_counts = Counter(token.lower() for token in TOKEN_RE.findall(content))
             score = sum(token_counts[term] for term in terms)
             if score:
                 ranked.append((score, relative, content))
+            if Path(relative).suffix.lower() == ".py":
+                file_symbols, file_call_sites, file_inheritance, file_imports = (
+                    self._matching_python_locations(relative, content, terms)
+                )
+                symbols.extend(file_symbols)
+                call_sites.extend(file_call_sites)
+                inheritance.extend(file_inheritance)
+                imports.extend(file_imports)
         ranked.sort(key=lambda item: (-item[0], item[1]))
+        symbols.sort(key=lambda item: (-item["score"], item["path"], item["line"]))
+        call_sites.sort(key=lambda item: (item["path"], item["line"], item["column"]))
+        inheritance.sort(key=lambda item: (item["path"], item["line"], item["base"]))
+        imports.sort(key=lambda item: (item["path"], item["line"], item["imported_name"]))
 
         matches = []
         for score, relative, content in ranked[:limit]:
@@ -126,7 +150,191 @@ class RepositoryContext:
             if not excerpt:
                 continue
             matches.append({"path": relative, "score": score, "excerpt": excerpt})
-        return {"matches": matches, "warnings": warnings}
+        return {
+            "matches": matches,
+            "symbols": symbols[:20],
+            "call_sites": call_sites[:100],
+            "inheritance": inheritance[:100],
+            "imports": imports[:100],
+            "warnings": warnings,
+        }
+
+    @staticmethod
+    def _matching_python_locations(
+        relative: str, content: str, terms: set[str]
+    ) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+        try:
+            tree = ast.parse(content, filename=relative)
+        except (SyntaxError, RecursionError, ValueError):
+            return [], [], [], []
+
+        symbols = []
+        call_sites = []
+        inheritance = []
+        imports = []
+        scopes = []
+        scope_kinds = []
+
+        def dotted_name(node):
+            if isinstance(node, ast.Name):
+                return node.id
+            if isinstance(node, ast.Attribute):
+                parent = dotted_name(node.value)
+                return f"{parent}.{node.attr}" if parent else node.attr
+            return None
+
+        def matching_score(name):
+            matched_terms = {
+                token.lower() for token in TOKEN_RE.findall(name)
+            }.intersection(terms)
+            return len(matched_terms) + (
+                2 if name.rsplit(".", 1)[-1].lower() in terms else 0
+            ) if matched_terms else 0
+
+        class PythonLocationVisitor(ast.NodeVisitor):
+            def visit_ClassDef(self, node):
+                for base_node in node.bases:
+                    base = dotted_name(base_node)
+                    if base and matching_score(base):
+                        inheritance.append({
+                            "path": relative,
+                            "class_name": node.name,
+                            "qualified_name": ".".join((*scopes, node.name)),
+                            "base": base,
+                            "line": node.lineno,
+                            "score": matching_score(base),
+                        })
+                self._visit_definition(node, "class")
+
+            def visit_FunctionDef(self, node):
+                self._visit_definition(node, "function")
+
+            def visit_AsyncFunctionDef(self, node):
+                self._visit_definition(node, "async function")
+
+            def _visit_definition(self, node, kind):
+                qualified_name = ".".join((*scopes, node.name))
+                self._record_symbol(
+                    node.name,
+                    qualified_name,
+                    kind,
+                    node.lineno,
+                    getattr(node, "end_lineno", node.lineno),
+                )
+                scopes.append(node.name)
+                scope_kinds.append("class" if kind == "class" else "function")
+                self.generic_visit(node)
+                scopes.pop()
+                scope_kinds.pop()
+
+            def _record_symbol(self, name, qualified_name, kind, line, end_line):
+                name_terms = {
+                    token.lower() for token in TOKEN_RE.findall(qualified_name)
+                }
+                matched_terms = name_terms.intersection(terms)
+                if matched_terms:
+                    symbols.append({
+                        "path": relative,
+                        "name": name,
+                        "qualified_name": qualified_name,
+                        "kind": kind,
+                        "line": line,
+                        "end_line": end_line,
+                        "score": len(matched_terms) + (2 if name.lower() in terms else 0),
+                    })
+
+            @staticmethod
+            def _target_names(target):
+                if isinstance(target, ast.Name):
+                    return [target]
+                if isinstance(target, (ast.Tuple, ast.List)):
+                    return [
+                        name
+                        for element in target.elts
+                        for name in PythonLocationVisitor._target_names(element)
+                    ]
+                return []
+
+            def _visit_assignment(self, node, targets):
+                if not scope_kinds or scope_kinds[-1] == "class":
+                    for target in targets:
+                        name = target.id
+                        qualified_name = ".".join((*scopes, name))
+                        kind = "constant" if name.isupper() else "variable"
+                        self._record_symbol(
+                            name,
+                            qualified_name,
+                            kind,
+                            node.lineno,
+                            getattr(node, "end_lineno", node.lineno),
+                        )
+                self.generic_visit(node)
+
+            def visit_Assign(self, node):
+                targets = [
+                    target
+                    for assignment_target in node.targets
+                    for target in self._target_names(assignment_target)
+                ]
+                self._visit_assignment(node, targets)
+
+            def visit_AnnAssign(self, node):
+                self._visit_assignment(node, self._target_names(node.target))
+
+            def visit_Call(self, node):
+                name = dotted_name(node.func)
+                if name:
+                    name_terms = {
+                        token.lower() for token in TOKEN_RE.findall(name)
+                    }
+                    matched_terms = name_terms.intersection(terms)
+                    if matched_terms:
+                        call_sites.append({
+                            "path": relative,
+                            "name": name,
+                            "scope": ".".join(scopes) or None,
+                            "line": node.lineno,
+                            "column": node.col_offset + 1,
+                            "score": matching_score(name),
+                        })
+                self.generic_visit(node)
+
+            def visit_Import(self, node):
+                for alias in node.names:
+                    imported_name = alias.name
+                    self._record_import(
+                        imported_name,
+                        alias.asname or imported_name.split(".", 1)[0],
+                        node.lineno,
+                    )
+
+            def visit_ImportFrom(self, node):
+                module = "." * node.level + (node.module or "")
+                for alias in node.names:
+                    if alias.name == "*":
+                        continue
+                    imported_name = f"{module}.{alias.name}" if module else alias.name
+                    self._record_import(
+                        imported_name,
+                        alias.asname or alias.name,
+                        node.lineno,
+                    )
+
+            @staticmethod
+            def _record_import(imported_name, local_name, line):
+                score = matching_score(imported_name)
+                if score:
+                    imports.append({
+                        "path": relative,
+                        "imported_name": imported_name,
+                        "local_name": local_name,
+                        "scope": ".".join(scopes) or None,
+                        "line": line,
+                        "score": score,
+                    })
+
+        PythonLocationVisitor().visit(tree)
+        return symbols, call_sites, inheritance, imports
 
     def _read_documents(self):
         documents = []

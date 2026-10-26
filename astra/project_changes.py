@@ -11,6 +11,7 @@ import tempfile
 from threading import RLock
 
 from .permissions import RepositoryPermissions
+from .project_audit import ProjectAuditLog
 from .repository import SENSITIVE_NAME_PARTS, SUPPORTED_SUFFIXES, SPECIAL_FILES
 
 
@@ -36,7 +37,12 @@ class Proposal:
 class ProjectChanges:
     """Stage a diff, then apply or roll it back only after explicit approval."""
 
-    def __init__(self, root: Path, permissions: RepositoryPermissions | None = None):
+    def __init__(
+        self,
+        root: Path,
+        permissions: RepositoryPermissions | None = None,
+        audit_path: Path | None = None,
+    ):
         self.root = Path(root).resolve(strict=True)
         if not self.root.is_dir():
             raise ValueError("Project root must be a directory")
@@ -44,6 +50,7 @@ class ProjectChanges:
         self.permissions.require_read()
         self._proposals: dict[str, Proposal] = {}
         self._audit_events: list[dict] = []
+        self._audit_log = ProjectAuditLog(audit_path) if audit_path is not None else None
         self._lock = RLock()
 
     def read_file(self, relative_path: str) -> dict:
@@ -124,10 +131,20 @@ class ProjectChanges:
             self._record_event("rolled_back", proposal_id, proposal)
             return self._describe(proposal_id, proposal)
 
-    def audit_log(self) -> list[dict]:
+    def audit_log(self) -> dict:
         with self._lock:
             self._expire_proposals()
-            return [dict(event) for event in self._audit_events]
+            if self._audit_log is None:
+                return {
+                    "events": [dict(event) for event in self._audit_events],
+                    "total": len(self._audit_events),
+                    "durable": False,
+                    "integrity": None,
+                }
+            result = self._audit_log.list_events()
+            result["durable"] = self._audit_log.durable
+            result["integrity"] = self._audit_log.verify()
+            return result
 
     def _resolve_target(self, relative_path: str):
         if not isinstance(relative_path, str) or not relative_path or len(relative_path) > 240:
@@ -226,7 +243,7 @@ class ProjectChanges:
             self._record_event("expired", proposal_id, proposal)
 
     def _record_event(self, event: str, proposal_id: str, proposal: Proposal):
-        self._audit_events.append({
+        record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "event": event,
             "proposal_id": proposal_id,
@@ -234,8 +251,12 @@ class ProjectChanges:
             "state": proposal.state,
             "original_sha256": proposal.original_hash,
             "proposed_sha256": proposal.replacement_hash,
-        })
-        del self._audit_events[:-MAX_AUDIT_EVENTS]
+        }
+        if self._audit_log is not None:
+            self._audit_log.append(event, proposal_id, proposal)
+        else:
+            self._audit_events.append(record)
+            del self._audit_events[:-MAX_AUDIT_EVENTS]
 
     @staticmethod
     def _describe(proposal_id: str, proposal: Proposal) -> dict:

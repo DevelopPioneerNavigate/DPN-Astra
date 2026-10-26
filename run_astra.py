@@ -10,7 +10,14 @@ from astra.server import serve
 def main():
     config = Config.from_env()
     archive = Archive(config.data_dir / "astra_memory.sqlite3")
-    repository = RepositoryContext(config.project_dir) if config.project_dir else None
+    repository = (
+        RepositoryContext(
+            config.project_dir,
+            audit_path=config.data_dir / "astra_project_audit.sqlite3",
+        )
+        if config.project_dir
+        else None
+    )
     core = AstraCore(OllamaProvider(config.ollama_url, config.model), archive, repository)
     serve(core, port=config.port)
 

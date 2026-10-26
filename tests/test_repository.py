@@ -13,6 +13,7 @@ from astra.config import Config
 from astra.core import AstraCore
 from astra.permissions import RepositoryPermissions
 from astra.project_changes import ProjectChanges
+from astra.project_audit import ProjectAuditLog
 from astra.project_validation import ProjectSyntaxError, ProjectValidation
 from astra.repository import RepositoryContext
 from astra.server import make_handler
@@ -49,8 +50,132 @@ class RepositoryContextTests(unittest.TestCase):
         self.assertEqual(1, result["matches"][0]["score"])
         self.assertIn("1: def dispatch_job():", result["matches"][0]["excerpt"])
         self.assertEqual(
+            {
+                "path": "engine.py",
+                "name": "dispatch_job",
+                "qualified_name": "dispatch_job",
+                "kind": "function",
+                "line": 1,
+                "end_line": 2,
+                "score": 3,
+            },
+            result["symbols"][0],
+        )
+        self.assertEqual(
             [{"path": "engine.py", "bytes": project_file.stat().st_size, "lines": 2}],
             repository.files()["files"],
+        )
+
+    def test_python_symbol_search_returns_nested_definitions_and_skips_invalid_files(self):
+        (self.root / "service.py").write_text(
+            "class QueueService:\n"
+            "    async def dispatch_job(self):\n"
+            "        def build_payload():\n"
+            "            return {}\n"
+            "        return build_payload()\n",
+            encoding="utf-8",
+        )
+        (self.root / "broken.py").write_text("def dispatch_job(:\n", encoding="utf-8")
+
+        result = RepositoryContext(self.root).search("QueueService")
+
+        symbols = result["symbols"]
+        self.assertEqual(
+            ["QueueService", "QueueService.dispatch_job", "QueueService.dispatch_job.build_payload"],
+            [symbol["qualified_name"] for symbol in symbols],
+        )
+        self.assertEqual(["class", "async function", "function"], [symbol["kind"] for symbol in symbols])
+        self.assertEqual([1, 2, 3], [symbol["line"] for symbol in symbols])
+        self.assertTrue(all(symbol["path"] == "service.py" for symbol in symbols))
+
+        call_site_result = RepositoryContext(self.root).search("build_payload")
+        self.assertEqual(1, len(call_site_result["call_sites"]))
+        self.assertEqual("QueueService.dispatch_job", call_site_result["call_sites"][0]["scope"])
+        self.assertEqual("build_payload", call_site_result["call_sites"][0]["name"])
+        self.assertEqual(5, call_site_result["call_sites"][0]["line"])
+        self.assertEqual(16, call_site_result["call_sites"][0]["column"])
+
+    def test_python_symbol_search_includes_module_and_class_assignments(self):
+        (self.root / "settings.py").write_text(
+            "DEFAULT_TIMEOUT = 30\n"
+            "class QueueService:\n"
+            "    max_timeout: int = DEFAULT_TIMEOUT\n"
+            "    def run(self):\n"
+            "        local_timeout = 2\n"
+            "        return local_timeout\n",
+            encoding="utf-8",
+        )
+
+        result = RepositoryContext(self.root).search("DEFAULT_TIMEOUT max_timeout")
+
+        self.assertEqual(
+            [
+                ("DEFAULT_TIMEOUT", "constant", "DEFAULT_TIMEOUT", 1),
+                ("max_timeout", "variable", "QueueService.max_timeout", 3),
+            ],
+            [
+                (symbol["name"], symbol["kind"], symbol["qualified_name"], symbol["line"])
+                for symbol in result["symbols"]
+            ],
+        )
+
+    def test_python_search_reports_inheritance_relationships(self):
+        (self.root / "services.py").write_text(
+            "class BaseQueue:\n"
+            "    pass\n"
+            "class QueueService(BaseQueue):\n"
+            "    pass\n"
+            "class DelayedQueue(services.BaseQueue):\n"
+            "    pass\n",
+            encoding="utf-8",
+        )
+
+        result = RepositoryContext(self.root).search("BaseQueue")
+
+        self.assertEqual(
+            [
+                ("QueueService", "BaseQueue", 3),
+                ("DelayedQueue", "services.BaseQueue", 5),
+            ],
+            [
+                (relation["class_name"], relation["base"], relation["line"])
+                for relation in result["inheritance"]
+            ],
+        )
+
+    def test_python_search_reports_matching_imports_and_aliases(self):
+        (self.root / "consumer.py").write_text(
+            "import package.scheduler as scheduler\n"
+            "from .helpers import build_payload as make_payload\n"
+            "def run_job():\n"
+            "    return scheduler.enqueue(make_payload())\n",
+            encoding="utf-8",
+        )
+
+        direct = RepositoryContext(self.root).search("scheduler")
+        self.assertEqual(
+            {
+                "path": "consumer.py",
+                "imported_name": "package.scheduler",
+                "local_name": "scheduler",
+                "scope": None,
+                "line": 1,
+                "score": 3,
+            },
+            direct["imports"][0],
+        )
+
+        relative = RepositoryContext(self.root).search("build_payload")
+        self.assertEqual(
+            {
+                "path": "consumer.py",
+                "imported_name": ".helpers.build_payload",
+                "local_name": "make_payload",
+                "scope": None,
+                "line": 2,
+                "score": 3,
+            },
+            relative["imports"][0],
         )
 
     def test_no_match_does_not_inject_unrelated_project_source(self):
@@ -266,10 +391,35 @@ class ProjectApiTests(unittest.TestCase):
         status, result = self.get_json("/api/project/search?q=dispatch_job")
         self.assertEqual(200, status)
         self.assertEqual("engine.py", result["matches"][0]["path"])
+        self.assertEqual("dispatch_job", result["symbols"][0]["name"])
 
         status, result = self.get_json("/api/project/files")
         self.assertEqual(200, status)
         self.assertEqual("engine.py", result["files"][0]["path"])
+
+    def test_project_search_returns_clickable_call_site_locations(self):
+        (self.root / "engine.py").write_text(
+            "def run_job():\n"
+            "    return scheduler.enqueue()\n",
+            encoding="utf-8",
+        )
+
+        status, result = self.get_json("/api/project/search?q=enqueue")
+
+        self.assertEqual(200, status)
+        self.assertEqual(
+            {
+                "path": "engine.py",
+                "name": "scheduler.enqueue",
+                "scope": "run_job",
+                "line": 2,
+                "column": 12,
+                "score": 3,
+            },
+            result["call_sites"][0],
+        )
+        self.assertEqual([], result["inheritance"])
+        self.assertEqual([], result["imports"])
 
     def test_project_endpoints_are_not_available_without_opt_in(self):
         core = AstraCore(Mock(), Archive(self.root / "without-project.sqlite"))
@@ -351,6 +501,23 @@ class ProjectApiTests(unittest.TestCase):
             ["staged", "applied", "rolled_back"],
             [event["event"] for event in history["events"]],
         )
+
+    def test_project_change_history_http_reports_durable_integrity(self):
+        audit_path = self.root / "audit" / "project_audit.sqlite3"
+        self.core.repository = RepositoryContext(self.root, audit_path=audit_path)
+        status, staged = self.post_json("/api/project/proposals", {
+            "path": "engine.py",
+            "content": "def dispatch_job():\n    return 'persistent'\n",
+        })
+        self.assertEqual(201, status)
+
+        status, history = self.get_json("/api/project/changes")
+
+        self.assertEqual(200, status)
+        self.assertTrue(history["durable"])
+        self.assertTrue(history["integrity"]["valid"])
+        self.assertEqual(1, history["total"])
+        self.assertEqual(staged["proposal"]["id"], history["events"][0]["proposal_id"])
 
     def test_invalid_syntax_proposal_http_is_rejected_before_staging(self):
         path = self.root / "engine.py"
@@ -435,7 +602,7 @@ class ProjectChangesTests(unittest.TestCase):
         self.changes.apply(proposal["id"], confirmed=True)
         self.changes.rollback(proposal["id"], confirmed=True)
 
-        events = self.changes.audit_log()
+        events = self.changes.audit_log()["events"]
 
         self.assertEqual(
             ["staged", "applied", "rolled_back"],
@@ -446,10 +613,81 @@ class ProjectChangesTests(unittest.TestCase):
         self.assertTrue(all("timestamp" in event for event in events))
         self.assertNotIn("sensitive", repr(events))
 
+    def test_sqlite_audit_log_survives_project_service_restart(self):
+        audit_path = self.root / "astra_data" / "project_audit.sqlite3"
+        changes = ProjectChanges(self.root, RepositoryPermissions(read=True), audit_path=audit_path)
+        proposal = changes.propose("sample.py", "value = 8\n")
+        changes.apply(proposal["id"], confirmed=True)
+
+        reopened = ProjectChanges(self.root, RepositoryPermissions(read=True), audit_path=audit_path)
+        report = reopened.audit_log()
+
+        self.assertTrue(report["durable"])
+        self.assertTrue(report["integrity"]["valid"])
+        self.assertEqual(["staged", "applied"], [event["event"] for event in report["events"]])
+        self.assertEqual(2, report["total"])
+
+    def test_sqlite_audit_log_detects_event_tampering(self):
+        audit_path = self.root / "project_audit.sqlite3"
+        changes = ProjectChanges(self.root, RepositoryPermissions(read=True), audit_path=audit_path)
+        changes.propose("sample.py", "value = 10\n")
+        audit = ProjectAuditLog(audit_path)
+        self.assertTrue(audit.verify()["valid"])
+
+        import sqlite3
+
+        db = sqlite3.connect(audit_path)
+        try:
+            db.execute("UPDATE project_change_events SET path = ? WHERE sequence = 1", ("tampered.py",))
+            db.commit()
+        finally:
+            db.close()
+        report = audit.verify()
+
+        self.assertFalse(report["valid"])
+        self.assertEqual(1, report["first_invalid_sequence"])
+
+    def test_sqlite_audit_log_limits_list_page_size(self):
+        audit = ProjectAuditLog(self.root / "audit.sqlite3")
+        with self.assertRaises(ValueError):
+            audit.list_events(101)
+        with self.assertRaises(ValueError):
+            audit.list_events(0)
+
+    def test_sqlite_audit_log_reports_latest_page_and_total(self):
+        audit_path = self.root / "paged_audit.sqlite3"
+        changes = ProjectChanges(self.root, RepositoryPermissions(read=True), audit_path=audit_path)
+        for value in (2, 3, 4):
+            changes.propose("sample.py", f"value = {value}\n")
+
+        page = ProjectAuditLog(audit_path).list_events(limit=2)
+
+        self.assertEqual(3, page["total"])
+        self.assertEqual(2, len(page["events"]))
+        self.assertEqual(["staged", "staged"], [event["event"] for event in page["events"]])
+        self.assertEqual(
+            page["events"],
+            sorted(page["events"], key=lambda event: event["sequence"]),
+        )
+
+    def test_sqlite_audit_log_rejects_unknown_schema_version(self):
+        import sqlite3
+
+        audit_path = self.root / "future_schema.sqlite3"
+        db = sqlite3.connect(audit_path)
+        try:
+            db.execute("PRAGMA user_version = 99")
+            db.commit()
+        finally:
+            db.close()
+
+        with self.assertRaisesRegex(RuntimeError, "Unsupported project audit schema version"):
+            ProjectAuditLog(audit_path)
+
     def test_audit_log_records_expired_proposal(self):
         with patch("astra.project_changes.PROPOSAL_LIFETIME", timedelta(days=-1)):
             proposal = self.changes.propose("sample.py", "value = 7\n")
-            events = self.changes.audit_log()
+            events = self.changes.audit_log()["events"]
 
         self.assertEqual(["staged", "expired"], [event["event"] for event in events])
         with self.assertRaisesRegex(ValueError, "expired"):
@@ -462,7 +700,7 @@ class ProjectChangesTests(unittest.TestCase):
                 self.changes.apply(proposal["id"], confirmed=True)
                 self.changes.rollback(proposal["id"], confirmed=True)
 
-        events = self.changes.audit_log()
+        events = self.changes.audit_log()["events"]
         self.assertEqual(2, len(events))
         self.assertEqual(["applied", "rolled_back"], [event["event"] for event in events])
 

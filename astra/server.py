@@ -107,10 +107,10 @@ def make_handler(core: AstraCore):
                 if core.repository is None:
                     self._send(404, {"error": "Read-only project context is not enabled"})
                     return
-                self._send(200, {
-                    "events": core.repository.changes.audit_log(),
-                    "durable": False,
-                })
+                try:
+                    self._send(200, core.repository.changes.audit_log())
+                except OSError as exc:
+                    self._send(500, {"error": f"Project audit log unavailable: {exc.strerror or str(exc)}"})
             else:
                 self._send(404, {"error": "Not found"})
 

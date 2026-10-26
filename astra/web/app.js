@@ -76,9 +76,14 @@
         list.append(item);
       }
       status.textContent = response.durable
-        ? "Change history loaded."
-        : "Temporary history: " + response.events.length + " event(s); cleared when ASTRA exits.";
-      if (!response.events.length) status.textContent += " No project change events recorded.";
+        ? "Persistent history: showing " + response.events.length + " of " + response.total + " event(s)."
+        : "Temporary history: " + response.total + " event(s); cleared when ASTRA exits.";
+      if (response.integrity) {
+        status.textContent += response.integrity.valid
+          ? " Hash chain verified (" + response.integrity.checked + " events)."
+          : " HASH CHAIN INVALID at event " + response.integrity.first_invalid_sequence + ".";
+      }
+      if (!response.total) status.textContent += " No project change events recorded.";
     } catch (error) {
       status.textContent = "Could not load project change history: " + (error.message || String(error));
     }
@@ -196,6 +201,68 @@
     results.replaceChildren();
     try {
       const data = await api("/api/project/search?q=" + encodeURIComponent(query));
+      for (const symbol of data.symbols) {
+        const section = document.createElement("section");
+        const button = document.createElement("button");
+        button.className = "ghost";
+        button.type = "button";
+        button.textContent = symbol.path + ":" + symbol.line + " · " +
+          symbol.kind + " " + symbol.qualified_name;
+        button.addEventListener("click", () => {
+          openProjectLocation(symbol.path, symbol.line).catch(error => {
+            status.textContent = "Could not open symbol location: " + (error.message || String(error));
+          });
+        });
+        section.append(button);
+        results.append(section);
+      }
+      for (const callSite of data.call_sites) {
+        const section = document.createElement("section");
+        const button = document.createElement("button");
+        button.className = "ghost";
+        button.type = "button";
+        button.textContent = callSite.path + ":" + callSite.line + ":" +
+          callSite.column + " · call to " + callSite.name +
+          (callSite.scope ? " in " + callSite.scope : "");
+        button.addEventListener("click", () => {
+          openProjectLocation(callSite.path, callSite.line).catch(error => {
+            status.textContent = "Could not open call-site location: " + (error.message || String(error));
+          });
+        });
+        section.append(button);
+        results.append(section);
+      }
+      for (const relation of data.inheritance) {
+        const section = document.createElement("section");
+        const button = document.createElement("button");
+        button.className = "ghost";
+        button.type = "button";
+        button.textContent = relation.path + ":" + relation.line + " · class " +
+          relation.qualified_name + " inherits " + relation.base;
+        button.addEventListener("click", () => {
+          openProjectLocation(relation.path, relation.line).catch(error => {
+            status.textContent = "Could not open inheritance location: " + (error.message || String(error));
+          });
+        });
+        section.append(button);
+        results.append(section);
+      }
+      for (const imported of data.imports) {
+        const section = document.createElement("section");
+        const button = document.createElement("button");
+        button.className = "ghost";
+        button.type = "button";
+        button.textContent = imported.path + ":" + imported.line + " · imports " +
+          imported.imported_name + " as " + imported.local_name +
+          (imported.scope ? " in " + imported.scope : "");
+        button.addEventListener("click", () => {
+          openProjectLocation(imported.path, imported.line).catch(error => {
+            status.textContent = "Could not open import location: " + (error.message || String(error));
+          });
+        });
+        section.append(button);
+        results.append(section);
+      }
       for (const match of data.matches) {
         const section = document.createElement("section");
         const heading = document.createElement("b");
@@ -205,8 +272,13 @@
         section.append(heading, excerpt);
         results.append(section);
       }
-      status.textContent = data.matches.length
-        ? "Read-only search returned " + data.matches.length + " source excerpt(s)."
+      status.textContent = data.matches.length || data.symbols.length ||
+        data.call_sites.length || data.inheritance.length || data.imports.length
+        ? "Read-only search returned " + data.symbols.length + " Python symbol(s), " +
+          data.call_sites.length + " Python call site(s), " +
+          data.inheritance.length + " inheritance relationship(s), " +
+          data.imports.length + " import(s), and " +
+          data.matches.length + " source excerpt(s)."
         : "No matching source excerpts found.";
       if (data.warnings.length) status.textContent += " Indexing note: " + data.warnings.join("; ");
     } catch (error) {
