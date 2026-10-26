@@ -299,7 +299,7 @@ class RepositoryContext:
         for item in imports:
             target = item["resolved_path"]
             source = item["path"]
-            if item["status"] == "local" and target in scanned_paths:
+            if target in scanned_paths:
                 graph[source].add(target)
                 edges.append({
                     "path": source,

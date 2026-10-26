@@ -444,7 +444,7 @@ class RepositoryContextTests(unittest.TestCase):
 
     def test_dependency_inventory_reports_circular_local_import_groups(self):
         (self.root / "alpha.py").write_text(
-            "from beta import beta_value\n"
+            "from beta import missing_value\n"
             "alpha_value = 1\n",
             encoding="utf-8",
         )
@@ -460,6 +460,13 @@ class RepositoryContextTests(unittest.TestCase):
 
         report = RepositoryContext(self.root).dependencies()
 
+        self.assertEqual(
+            "missing-local-target",
+            next(
+                item["issue"] for item in report["imports"]
+                if item["path"] == "alpha.py"
+            ),
+        )
         self.assertEqual(
             [
                 {
