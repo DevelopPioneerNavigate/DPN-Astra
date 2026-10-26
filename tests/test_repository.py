@@ -547,6 +547,10 @@ class RepositoryContextTests(unittest.TestCase):
             'load(name="helper")\n'
             'from builtins import __import__ as builtin_import\n'
             'builtin_import(name="external_plugin.worker")\n'
+            'import builtins as bi\n'
+            'bi.__import__("helper")\n'
+            'import builtins\n'
+            'builtins.__import__(name="helper")\n'
             "importlib.import_module(resolve_module_name())\n",
             encoding="utf-8",
         )
@@ -557,12 +561,14 @@ class RepositoryContextTests(unittest.TestCase):
             item for item in report["imports"]
             if item["dynamic"]
         ]
-        self.assertEqual(3, report["summary"]["dynamic_imports"])
+        self.assertEqual(5, report["summary"]["dynamic_imports"])
         self.assertEqual(
             [
                 ("helper", "local", "helper.py"),
                 ("helper", "local", "helper.py"),
                 ("external_plugin.worker", "unresolved-absolute", None),
+                ("helper", "local", "helper.py"),
+                ("helper", "local", "helper.py"),
             ],
             [
                 (item["imported_name"], item["status"], item["resolved_path"])

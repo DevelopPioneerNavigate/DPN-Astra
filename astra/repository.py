@@ -462,6 +462,10 @@ class RepositoryContext:
                         dynamic_import_call_names[
                             f"{alias.asname or alias.name}.import_module"
                         ] = "importlib"
+                    elif alias.name == "builtins":
+                        dynamic_import_call_names[
+                            f"{alias.asname or alias.name}.__import__"
+                        ] = "import"
             elif isinstance(candidate, ast.ImportFrom) and candidate.module in {"importlib", "builtins"}:
                 for alias in candidate.names:
                     if candidate.module == "importlib" and alias.name == "import_module":
