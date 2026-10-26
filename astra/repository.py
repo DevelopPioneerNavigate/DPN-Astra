@@ -431,6 +431,23 @@ class RepositoryContext:
         scopes = []
         scope_kinds = []
         imports_truncated = False
+        dynamic_import_call_names = {
+            "__import__": "import",
+            "importlib.import_module": "importlib",
+        }
+        for candidate in ast.walk(tree):
+            if isinstance(candidate, ast.Import):
+                for alias in candidate.names:
+                    if alias.name == "importlib":
+                        dynamic_import_call_names[
+                            f"{alias.asname or alias.name}.import_module"
+                        ] = "importlib"
+            elif isinstance(candidate, ast.ImportFrom) and candidate.module in {"importlib", "builtins"}:
+                for alias in candidate.names:
+                    if candidate.module == "importlib" and alias.name == "import_module":
+                        dynamic_import_call_names[alias.asname or alias.name] = "importlib"
+                    elif candidate.module == "builtins" and alias.name == "__import__":
+                        dynamic_import_call_names[alias.asname or alias.name] = "import"
 
         def dotted_name(node):
             if isinstance(node, ast.Name):
@@ -540,23 +557,34 @@ class RepositoryContext:
 
             def visit_Call(self, node):
                 name = dotted_name(node.func)
-                if name in {"__import__", "importlib.import_module"} and node.args:
+                dynamic_kind = dynamic_import_call_names.get(name)
+                if dynamic_kind:
+                    module_node = (
+                        node.args[0]
+                        if node.args
+                        else next(
+                            (keyword.value for keyword in node.keywords if keyword.arg == "name"),
+                            None,
+                        )
+                    )
                     try:
-                        module_name = ast.literal_eval(node.args[0])
+                        module_name = ast.literal_eval(module_node)
                     except (ValueError, TypeError):
                         module_name = None
                     relative_level = 0
                     if isinstance(module_name, str) and module_name.startswith("."):
-                        package_node = next(
-                            (keyword.value for keyword in node.keywords if keyword.arg == "package"),
-                            node.args[1] if len(node.args) > 1 else None,
-                        )
+                        package_node = None
+                        if dynamic_kind == "importlib":
+                            package_node = next(
+                                (keyword.value for keyword in node.keywords if keyword.arg == "package"),
+                                node.args[1] if len(node.args) > 1 else None,
+                            )
                         try:
                             package_name = ast.literal_eval(package_node)
                         except (ValueError, TypeError):
                             package_name = None
                         if (
-                            name == "importlib.import_module"
+                            dynamic_kind == "importlib"
                             and isinstance(package_name, str)
                             and package_name
                             and all(part.isidentifier() for part in package_name.split("."))

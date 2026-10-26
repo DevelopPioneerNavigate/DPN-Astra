@@ -542,8 +542,11 @@ class RepositoryContextTests(unittest.TestCase):
     def test_dependency_inventory_finds_literal_dynamic_imports(self):
         (self.root / "helper.py").write_text("value = 1\n", encoding="utf-8")
         (self.root / "dynamic_loader.py").write_text(
-            'import importlib; importlib.import_module("helper")\n'
-            '__import__("external_plugin.worker")\n'
+            'import importlib as il; il.import_module("helper")\n'
+            'from importlib import import_module as load\n'
+            'load(name="helper")\n'
+            'from builtins import __import__ as builtin_import\n'
+            'builtin_import(name="external_plugin.worker")\n'
             "importlib.import_module(resolve_module_name())\n",
             encoding="utf-8",
         )
@@ -554,9 +557,10 @@ class RepositoryContextTests(unittest.TestCase):
             item for item in report["imports"]
             if item["dynamic"]
         ]
-        self.assertEqual(2, report["summary"]["dynamic_imports"])
+        self.assertEqual(3, report["summary"]["dynamic_imports"])
         self.assertEqual(
             [
+                ("helper", "local", "helper.py"),
                 ("helper", "local", "helper.py"),
                 ("external_plugin.worker", "unresolved-absolute", None),
             ],
