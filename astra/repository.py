@@ -130,6 +130,11 @@ class RepositoryContext:
         call_sites = []
         inheritance = []
         imports = []
+        indexed_python_paths = {
+            relative
+            for relative, _, _ in documents
+            if Path(relative).suffix.lower() == ".py"
+        }
         ast_warnings = []
         for relative, content, _ in documents:
             token_counts = Counter(token.lower() for token in TOKEN_RE.findall(content))
@@ -144,7 +149,9 @@ class RepositoryContext:
                     file_imports,
                     ast_warning,
                 ) = (
-                    self._matching_python_locations(relative, content, terms)
+                    self._matching_python_locations(
+                        relative, content, terms, indexed_python_paths=indexed_python_paths
+                    )
                 )
                 symbols.extend(file_symbols)
                 call_sites.extend(file_call_sites)
@@ -183,6 +190,7 @@ class RepositoryContext:
             if Path(document[0]).suffix.lower() == ".py"
         ]
         import_records = []
+        indexed_python_paths = {relative for relative, _, _ in python_documents}
         ast_warnings = []
         truncated = False
         files_scanned = 0
@@ -202,7 +210,11 @@ class RepositoryContext:
                 file_imports,
                 ast_warning,
             ) = self._matching_python_locations(
-                relative, content, set(), include_all_imports=True
+                relative,
+                content,
+                set(),
+                include_all_imports=True,
+                indexed_python_paths=indexed_python_paths,
             )
             if ast_warning:
                 ast_warnings.append(ast_warning)
@@ -398,6 +410,7 @@ class RepositoryContext:
         content: str,
         terms: set[str],
         include_all_imports: bool = False,
+        indexed_python_paths: set[str] | None = None,
     ) -> tuple[list[dict], list[dict], list[dict], list[dict], str | None]:
         try:
             tree = ast.parse(content, filename=relative)
@@ -431,6 +444,13 @@ class RepositoryContext:
         scopes = []
         scope_kinds = []
         imports_truncated = False
+        indexed_python_paths = indexed_python_paths or set()
+        package_parts = list(PurePosixPath(relative).parent.parts)
+        is_package_module = bool(package_parts) and all(
+            PurePosixPath(*package_parts[:index], "__init__.py").as_posix()
+            in indexed_python_paths
+            for index in range(1, len(package_parts) + 1)
+        )
         dynamic_import_call_names = {
             "__import__": "import",
             "importlib.import_module": "importlib",
@@ -572,6 +592,39 @@ class RepositoryContext:
                     except (ValueError, TypeError):
                         module_name = None
                     relative_level = 0
+                    if (
+                        dynamic_kind == "import"
+                        and isinstance(module_name, str)
+                        and module_name
+                        and not module_name.startswith(".")
+                    ):
+                        level_node = (
+                            next(
+                                (keyword.value for keyword in node.keywords if keyword.arg == "level"),
+                                None,
+                            )
+                        )
+                        if level_node is not None:
+                            try:
+                                level = ast.literal_eval(level_node)
+                            except (ValueError, TypeError):
+                                level = None
+                        elif len(node.args) > 4:
+                            try:
+                                level = ast.literal_eval(node.args[4])
+                            except (ValueError, TypeError):
+                                level = None
+                        else:
+                            level = 0
+                        if (
+                            type(level) is int
+                            and level > 0
+                            and is_package_module
+                            and level <= len(package_parts)
+                        ):
+                            relative_level = level
+                        elif type(level) is int and level > 0:
+                            module_name = None
                     if isinstance(module_name, str) and module_name.startswith("."):
                         package_node = None
                         if dynamic_kind == "importlib":
@@ -590,11 +643,13 @@ class RepositoryContext:
                             and all(part.isidentifier() for part in package_name.split("."))
                         ):
                             relative_level = len(module_name) - len(module_name.lstrip("."))
-                            package_parts = package_name.split(".")
-                            if relative_level <= len(package_parts):
+                            relative_package_parts = package_name.split(".")
+                            if relative_level <= len(relative_package_parts):
                                 module_parts = module_name.lstrip(".").split(".")
                                 module_name = ".".join(
-                                    package_parts[:len(package_parts) - relative_level + 1]
+                                    relative_package_parts[
+                                        :len(relative_package_parts) - relative_level + 1
+                                    ]
                                     + ([part for part in module_parts if part] if module_parts != [""] else [])
                                 )
                                 relative_level = 0
