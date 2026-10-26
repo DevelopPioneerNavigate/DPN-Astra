@@ -2,7 +2,7 @@
 import ast
 import os
 from collections import Counter
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 
 from .permissions import RepositoryPermissions
@@ -138,6 +138,7 @@ class RepositoryContext:
                 call_sites.extend(file_call_sites)
                 inheritance.extend(file_inheritance)
                 imports.extend(file_imports)
+        imports = self._resolve_local_imports(imports, documents)
         ranked.sort(key=lambda item: (-item[0], item[1]))
         symbols.sort(key=lambda item: (-item["score"], item["path"], item["line"]))
         call_sites.sort(key=lambda item: (item["path"], item["line"], item["column"]))
@@ -306,6 +307,9 @@ class RepositoryContext:
                         imported_name,
                         alias.asname or imported_name.split(".", 1)[0],
                         node.lineno,
+                        module_name=alias.name,
+                        member_name=None,
+                        relative_level=0,
                     )
 
             def visit_ImportFrom(self, node):
@@ -318,10 +322,20 @@ class RepositoryContext:
                         imported_name,
                         alias.asname or alias.name,
                         node.lineno,
+                        module_name=node.module or "",
+                        member_name=alias.name,
+                        relative_level=node.level,
                     )
 
-            @staticmethod
-            def _record_import(imported_name, local_name, line):
+            def _record_import(
+                self,
+                imported_name,
+                local_name,
+                line,
+                module_name,
+                member_name,
+                relative_level,
+            ):
                 score = matching_score(imported_name)
                 if score:
                     imports.append({
@@ -331,10 +345,87 @@ class RepositoryContext:
                         "scope": ".".join(scopes) or None,
                         "line": line,
                         "score": score,
+                        "_module_name": module_name,
+                        "_member_name": member_name,
+                        "_relative_level": relative_level,
                     })
 
         PythonLocationVisitor().visit(tree)
         return symbols, call_sites, inheritance, imports
+
+    @staticmethod
+    def _resolve_local_imports(imports: list[dict], documents: list[tuple]) -> list[dict]:
+        modules = {}
+        contents = {}
+        for relative, content, _ in documents:
+            path = Path(relative)
+            if path.suffix.lower() != ".py":
+                continue
+            parts = path.parent.parts if path.name == "__init__.py" else path.with_suffix("").parts
+            module_name = ".".join(parts)
+            if module_name:
+                modules[module_name] = relative
+                contents[relative] = content
+
+        resolved = []
+        for record in imports:
+            result = {key: value for key, value in record.items() if not key.startswith("_")}
+            path_parts = PurePosixPath(record["path"]).parent.parts
+            package_parts = list(path_parts)
+            level = record["_relative_level"]
+            if level > len(package_parts):
+                result["resolved_path"] = None
+                result["resolved_line"] = None
+                resolved.append(result)
+                continue
+            if level:
+                package_parts = package_parts[:max(0, len(package_parts) - level + 1)]
+            module_parts = record["_module_name"].split(".") if record["_module_name"] else []
+            base_parts = package_parts + module_parts
+            candidates = []
+            member = record["_member_name"]
+            if member is None:
+                candidates.append(".".join(base_parts))
+            else:
+                if member != "*":
+                    candidates.append(".".join(base_parts + [member]))
+                candidates.append(".".join(base_parts))
+
+            for candidate in candidates:
+                target_path = modules.get(candidate)
+                if target_path is None:
+                    continue
+                result["resolved_path"] = target_path
+                result["resolved_line"] = (
+                    RepositoryContext._find_python_name_line(contents[target_path], member)
+                    if member
+                    else 1
+                )
+                break
+            else:
+                result["resolved_path"] = None
+                result["resolved_line"] = None
+            resolved.append(result)
+        return resolved
+
+    @staticmethod
+    def _find_python_name_line(content: str, name: str) -> int:
+        try:
+            tree = ast.parse(content)
+        except (SyntaxError, RecursionError, ValueError):
+            return 1
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+                return node.lineno
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    if any(
+                        isinstance(child, ast.Name) and child.id == name
+                        for child in ast.walk(target)
+                    ):
+                        return node.lineno
+        return 1
 
     def _read_documents(self):
         documents = []

@@ -161,6 +161,8 @@ class RepositoryContextTests(unittest.TestCase):
                 "scope": None,
                 "line": 1,
                 "score": 3,
+                "resolved_path": None,
+                "resolved_line": None,
             },
             direct["imports"][0],
         )
@@ -174,9 +176,34 @@ class RepositoryContextTests(unittest.TestCase):
                 "scope": None,
                 "line": 2,
                 "score": 3,
+                "resolved_path": None,
+                "resolved_line": None,
             },
             relative["imports"][0],
         )
+
+    def test_python_search_resolves_imports_to_local_modules_and_definitions(self):
+        package = self.root / "package"
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "tasks.py").write_text(
+            "def dispatch_job():\n"
+            "    return 'ready'\n",
+            encoding="utf-8",
+        )
+        (package / "consumer.py").write_text(
+            "from .tasks import dispatch_job as run_job\n"
+            "import package.tasks as task_module\n",
+            encoding="utf-8",
+        )
+
+        imported_symbol = RepositoryContext(self.root).search("dispatch_job")["imports"][0]
+        imported_module = RepositoryContext(self.root).search("tasks")["imports"][0]
+
+        self.assertEqual("package/tasks.py", imported_symbol["resolved_path"])
+        self.assertEqual(1, imported_symbol["resolved_line"])
+        self.assertEqual("package/tasks.py", imported_module["resolved_path"])
+        self.assertEqual(1, imported_module["resolved_line"])
 
     def test_no_match_does_not_inject_unrelated_project_source(self):
         (self.root / "core.py").write_text("def calculate_signal():\n    return 1\n", encoding="utf-8")
