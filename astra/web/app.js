@@ -331,6 +331,7 @@
           (imported.dynamic ? " dynamically loads " : " imports ") +
           imported.imported_name +
           (imported.dynamic ? "" : " as " + imported.local_name) +
+          (imported.type_checking ? " (TYPE_CHECKING)" : "") +
           (imported.wildcard ? " (wildcard)" : "") +
           " [" + imported.status + "]" +
           (imported.issue ? " — " + imported.issue : "");
@@ -404,7 +405,8 @@
         missingCount + " likely missing local target(s), " +
         unusedCount + " possibly unused import(s), " +
         data.cycles.length + " circular local import group(s); " +
-        summary.dynamic_imports + " literal dynamic load(s).";
+        summary.dynamic_imports + " literal dynamic load(s); " +
+        summary.type_checking_imports + " type-checking-only import(s).";
       if (summary.truncated) status.textContent += " Results were capped.";
       if (data.warnings.length) status.textContent += " " + data.warnings.join("; ");
       if (!summary.imports_returned) status.textContent += " No imports found.";

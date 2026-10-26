@@ -267,6 +267,7 @@ class RepositoryContext:
                 item["issue"] = "possibly-unused-import"
 
         dynamic_imports = sum(item["dynamic"] for item in imports)
+        type_checking_imports = sum(item["type_checking"] for item in imports)
         cycles = self._find_local_import_cycles(
             imports,
             {
@@ -300,6 +301,7 @@ class RepositoryContext:
                 "eligible_files": len(python_documents),
                 "imports_returned": len(imports),
                 "dynamic_imports": dynamic_imports,
+                "type_checking_imports": type_checking_imports,
                 "local": local_count,
                 "unresolved": unresolved_count,
                 "truncated": truncated,
@@ -314,7 +316,7 @@ class RepositoryContext:
         for item in imports:
             target = item["resolved_path"]
             source = item["path"]
-            if target in scanned_paths:
+            if target in scanned_paths and not item.get("type_checking", False):
                 graph[source].add(target)
                 edges.append({
                     "path": source,
@@ -455,6 +457,7 @@ class RepositoryContext:
             "__import__": "import",
             "importlib.import_module": "importlib",
         }
+        type_checking_names = set()
         for candidate in ast.walk(tree):
             if isinstance(candidate, ast.Import):
                 for alias in candidate.names:
@@ -466,12 +469,21 @@ class RepositoryContext:
                         dynamic_import_call_names[
                             f"{alias.asname or alias.name}.__import__"
                         ] = "import"
+                    elif alias.name in {"typing", "typing_extensions"}:
+                        type_checking_names.add(
+                            f"{alias.asname or alias.name}.TYPE_CHECKING"
+                        )
             elif isinstance(candidate, ast.ImportFrom) and candidate.module in {"importlib", "builtins"}:
                 for alias in candidate.names:
                     if candidate.module == "importlib" and alias.name == "import_module":
                         dynamic_import_call_names[alias.asname or alias.name] = "importlib"
                     elif candidate.module == "builtins" and alias.name == "__import__":
                         dynamic_import_call_names[alias.asname or alias.name] = "import"
+            elif isinstance(candidate, ast.ImportFrom) and candidate.module in {"typing", "typing_extensions"}:
+                for alias in candidate.names:
+                    if alias.name == "TYPE_CHECKING":
+                        type_checking_names.add(alias.asname or alias.name)
+        type_checking_stack = [False]
 
         def dotted_name(node):
             if isinstance(node, ast.Name):
@@ -490,6 +502,18 @@ class RepositoryContext:
             ) if matched_terms else 0
 
         class PythonLocationVisitor(ast.NodeVisitor):
+            def visit_If(self, node):
+                self.visit(node.test)
+                is_type_checking = dotted_name(node.test) in type_checking_names
+                type_checking_stack.append(
+                    type_checking_stack[-1] or is_type_checking
+                )
+                for statement in node.body:
+                    self.visit(statement)
+                type_checking_stack.pop()
+                for statement in node.orelse:
+                    self.visit(statement)
+
             def visit_ClassDef(self, node):
                 for base_node in node.bases:
                     base = dotted_name(base_node)
@@ -750,6 +774,7 @@ class RepositoryContext:
                         "_member_name": member_name,
                         "_relative_level": relative_level,
                         "_import_end_column": import_end_column,
+                        "_type_checking": type_checking_stack[-1],
                     })
                 elif score or include_all_imports:
                     imports_truncated = True
@@ -791,6 +816,7 @@ class RepositoryContext:
             member_resolved = False
             if include_module_name:
                 result["_module_name"] = record["_module_name"]
+                result["type_checking"] = record["_type_checking"]
             result["references"] = RepositoryContext._find_lexical_references(
                 contents.get(record["path"], ""),
                 record["local_name"],

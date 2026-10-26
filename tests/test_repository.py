@@ -482,6 +482,40 @@ class RepositoryContextTests(unittest.TestCase):
             report["cycles"],
         )
 
+    def test_type_checking_imports_are_not_runtime_cycle_edges(self):
+        (self.root / "alpha.py").write_text(
+            "from typing import TYPE_CHECKING as TC\n"
+            "if TC:\n"
+            "    import beta\n"
+            "import typing as typing_module\n"
+            "if typing_module.TYPE_CHECKING:\n"
+            "    import gamma\n",
+            encoding="utf-8",
+        )
+        (self.root / "beta.py").write_text(
+            "import alpha\n",
+            encoding="utf-8",
+        )
+        (self.root / "gamma.py").write_text("import alpha\n", encoding="utf-8")
+
+        report = RepositoryContext(self.root).dependencies()
+
+        type_only = next(
+            item for item in report["imports"]
+            if item["path"] == "alpha.py" and item["imported_name"] == "beta"
+        )
+        self.assertTrue(type_only["type_checking"])
+        self.assertFalse(
+            next(item for item in report["imports"] if item["path"] == "beta.py")["type_checking"]
+        )
+        qualified_type_only = next(
+            item for item in report["imports"]
+            if item["path"] == "alpha.py" and item["imported_name"] == "gamma"
+        )
+        self.assertTrue(qualified_type_only["type_checking"])
+        self.assertEqual(2, report["summary"]["type_checking_imports"])
+        self.assertEqual([], report["cycles"])
+
     def test_dependency_inventory_reports_possible_unused_imports_conservatively(self):
         package = self.root / "package"
         package.mkdir()
