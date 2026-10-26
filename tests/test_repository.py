@@ -321,6 +321,10 @@ class RepositoryContextTests(unittest.TestCase):
         self.assertEqual(3, report["summary"]["imports_returned"])
         self.assertEqual(1, report["summary"]["local"])
         self.assertEqual(2, report["summary"]["unresolved"])
+        self.assertEqual(
+            [(".missing.unavailable", "missing-local-target")],
+            [(issue["imported_name"], issue["issue"]) for issue in report["issues"]],
+        )
         self.assertFalse(report["summary"]["truncated"])
         self.assertEqual(
             [
@@ -364,6 +368,31 @@ class RepositoryContextTests(unittest.TestCase):
         )
         search = RepositoryContext(self.root).search("exports")
         self.assertTrue(search["imports"][0]["wildcard"])
+
+    def test_dependency_inventory_does_not_call_unmatched_absolute_import_missing(self):
+        (self.root / "engine.py").write_text(
+            "import third_party.client\n"
+            "import project_plugin.module\n",
+            encoding="utf-8",
+        )
+        (self.root / "project_plugin.py").write_text("value = 1\n", encoding="utf-8")
+
+        report = RepositoryContext(self.root).dependencies()
+
+        self.assertEqual(
+            [
+                ("third_party.client", "unresolved-absolute", None),
+                ("project_plugin.module", "unresolved-local", "missing-local-target"),
+            ],
+            [
+                (item["imported_name"], item["status"], item["issue"])
+                for item in report["imports"]
+            ],
+        )
+        self.assertEqual(
+            ["project_plugin.module"],
+            [issue["imported_name"] for issue in report["issues"]],
+        )
 
     def test_dependency_inventory_caps_imports_and_surfaces_warning(self):
         (self.root / "many_imports.py").write_text(

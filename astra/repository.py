@@ -217,21 +217,41 @@ class RepositoryContext:
                 truncated = index + 1 < len(python_documents)
                 break
 
-        imports = self._resolve_local_imports(import_records, documents)
+        imports = self._resolve_local_imports(
+            import_records, documents, include_module_name=True
+        )
         imports.sort(key=lambda item: (item["path"], item["line"], item["imported_name"]))
         for item in imports:
+            module_name = item.pop("_module_name")
             if item["resolved_path"]:
                 item["status"] = "local"
+                item["issue"] = None
             elif item["imported_name"].startswith("."):
                 item["status"] = "unresolved-relative"
+                item["issue"] = "missing-local-target"
+            elif self._has_local_import_root(module_name, documents):
+                item["status"] = "unresolved-local"
+                item["issue"] = "missing-local-target"
             else:
                 item["status"] = "unresolved-absolute"
+                item["issue"] = None
 
         warnings.extend(ast_warnings)
         local_count = sum(item["status"] == "local" for item in imports)
         unresolved_count = len(imports) - local_count
         return {
             "imports": imports,
+            "issues": [
+                {
+                    "path": item["path"],
+                    "line": item["line"],
+                    "imported_name": item["imported_name"],
+                    "issue": item["issue"],
+                    "message": "Local import target could not be resolved",
+                }
+                for item in imports
+                if item["issue"]
+            ],
             "summary": {
                 "files_scanned": files_scanned,
                 "eligible_files": len(python_documents),
@@ -242,6 +262,24 @@ class RepositoryContext:
             },
             "warnings": warnings,
         }
+
+    @staticmethod
+    def _has_local_import_root(module_name: str, documents: list[tuple]) -> bool:
+        if not module_name:
+            return False
+        root = module_name.split(".", 1)[0]
+        for relative, _, _ in documents:
+            path = PurePosixPath(relative)
+            module_parts = (
+                path.parent.parts
+                if path.name == "__init__.py"
+                else path.with_suffix("").parts
+                if path.suffix.lower() == ".py"
+                else path.parts
+            )
+            if module_parts and module_parts[0] == root:
+                return True
+        return False
 
     @staticmethod
     def _matching_python_locations(
@@ -472,7 +510,11 @@ class RepositoryContext:
         return symbols, call_sites, inheritance, imports, warning
 
     @staticmethod
-    def _resolve_local_imports(imports: list[dict], documents: list[tuple]) -> list[dict]:
+    def _resolve_local_imports(
+        imports: list[dict],
+        documents: list[tuple],
+        include_module_name: bool = False,
+    ) -> list[dict]:
         modules = {}
         contents = {}
         references_by_path = {}
@@ -489,6 +531,8 @@ class RepositoryContext:
         resolved = []
         for record in imports:
             result = {key: value for key, value in record.items() if not key.startswith("_")}
+            if include_module_name:
+                result["_module_name"] = record["_module_name"]
             result["references"] = RepositoryContext._find_lexical_references(
                 contents.get(record["path"], ""),
                 record["local_name"],

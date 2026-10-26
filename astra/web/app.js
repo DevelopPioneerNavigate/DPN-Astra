@@ -330,7 +330,8 @@
         source.textContent = imported.path + ":" + imported.line + " imports " +
           imported.imported_name + " as " + imported.local_name +
           (imported.wildcard ? " (wildcard)" : "") +
-          " [" + imported.status + "]";
+          " [" + imported.status + "]" +
+          (imported.issue ? " — " + imported.issue : "");
         source.addEventListener("click", () => {
           openProjectLocation(imported.path, imported.line).catch(error => {
             status.textContent = "Could not open import declaration: " + (error.message || String(error));
@@ -352,10 +353,26 @@
         }
         results.append(item);
       }
+      for (const issue of data.issues) {
+        const item = document.createElement("li");
+        const button = document.createElement("button");
+        button.className = "ghost";
+        button.type = "button";
+        button.textContent = issue.path + ":" + issue.line + " · " +
+          issue.message + ": " + issue.imported_name;
+        button.addEventListener("click", () => {
+          openProjectLocation(issue.path, issue.line).catch(error => {
+            status.textContent = "Could not open unresolved import: " + (error.message || String(error));
+          });
+        });
+        item.append(button);
+        results.append(item);
+      }
       const summary = data.summary;
       status.textContent = "Scanned " + summary.files_scanned + " of " +
         summary.eligible_files + " Python file(s); " + summary.local +
-        " local and " + summary.unresolved + " unresolved import(s).";
+        " local and " + summary.unresolved + " unresolved import(s); " +
+        data.issues.length + " likely missing local target(s).";
       if (summary.truncated) status.textContent += " Results were capped.";
       if (data.warnings.length) status.textContent += " " + data.warnings.join("; ");
       if (!summary.imports_returned) status.textContent += " No imports found.";
