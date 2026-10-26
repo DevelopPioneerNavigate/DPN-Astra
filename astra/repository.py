@@ -392,6 +392,7 @@ class RepositoryContext:
     def _resolve_local_imports(imports: list[dict], documents: list[tuple]) -> list[dict]:
         modules = {}
         contents = {}
+        references_by_path = {}
         for relative, content, _ in documents:
             path = Path(relative)
             if path.suffix.lower() != ".py":
@@ -400,11 +401,18 @@ class RepositoryContext:
             module_name = ".".join(parts)
             if module_name:
                 modules[module_name] = relative
-                contents[relative] = content
+            contents[relative] = content
 
         resolved = []
         for record in imports:
             result = {key: value for key, value in record.items() if not key.startswith("_")}
+            result["references"] = RepositoryContext._find_lexical_references(
+                contents.get(record["path"], ""),
+                record["local_name"],
+                record["line"],
+                record["path"],
+                references_by_path,
+            )
             path_parts = PurePosixPath(record["path"]).parent.parts
             level = record["_relative_level"]
             package_parts = list(path_parts) if level else []
@@ -451,6 +459,46 @@ class RepositoryContext:
                 result["resolved_kind"] = None
             resolved.append(result)
         return resolved
+
+    @staticmethod
+    def _find_lexical_references(
+        content: str,
+        name: str,
+        import_line: int,
+        relative_path: str,
+        references_by_path: dict[str, dict[str, list[dict]]],
+    ) -> list[dict]:
+        if relative_path in references_by_path:
+            references = references_by_path[relative_path]
+            return [
+                reference
+                for reference in references.get(name, [])
+                if reference["line"] != import_line
+            ][:100]
+        try:
+            tree = ast.parse(content, filename=relative_path)
+        except (SyntaxError, RecursionError, ValueError):
+            return []
+
+        references: dict[str, list[dict]] = {}
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Name)
+                and isinstance(node.ctx, ast.Load)
+            ):
+                references.setdefault(node.id, []).append({
+                    "path": relative_path,
+                    "line": node.lineno,
+                    "column": node.col_offset + 1,
+                })
+        for name_references in references.values():
+            name_references.sort(key=lambda item: (item["line"], item["column"]))
+        references_by_path[relative_path] = references
+        return [
+            reference
+            for reference in references.get(name, [])
+            if reference["line"] != import_line
+        ][:100]
 
     @staticmethod
     def _find_module_export(content: str, name: str) -> dict | None:

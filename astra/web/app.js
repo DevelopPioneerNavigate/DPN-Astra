@@ -277,6 +277,19 @@
           });
           section.append(target);
         }
+        for (const reference of imported.references) {
+          const usage = document.createElement("button");
+          usage.className = "ghost";
+          usage.type = "button";
+          usage.textContent = "Open lexical reference " + reference.path +
+            ":" + reference.line + ":" + reference.column;
+          usage.addEventListener("click", () => {
+            openProjectLocation(reference.path, reference.line).catch(error => {
+              status.textContent = "Could not open lexical reference: " + (error.message || String(error));
+            });
+          });
+          section.append(usage);
+        }
         results.append(section);
       }
       for (const match of data.matches) {
