@@ -16,6 +16,8 @@ MAX_CONTEXT_CHARS = 12_000
 MAX_MATCHED_FILES = 6
 MAX_EXCERPT_LINES = 32
 MAX_EXCERPT_CHARS = 1_800
+MAX_PYTHON_AST_NODES = 50_000
+MAX_PYTHON_AST_DEPTH = 200
 
 SUPPORTED_SUFFIXES = {
     ".c", ".cc", ".cpp", ".cs", ".css", ".cxx", ".go", ".h", ".hpp",
@@ -125,20 +127,30 @@ class RepositoryContext:
         call_sites = []
         inheritance = []
         imports = []
+        ast_warnings = []
         for relative, content, _ in documents:
             token_counts = Counter(token.lower() for token in TOKEN_RE.findall(content))
             score = sum(token_counts[term] for term in terms)
             if score:
                 ranked.append((score, relative, content))
             if Path(relative).suffix.lower() == ".py":
-                file_symbols, file_call_sites, file_inheritance, file_imports = (
+                (
+                    file_symbols,
+                    file_call_sites,
+                    file_inheritance,
+                    file_imports,
+                    ast_warning,
+                ) = (
                     self._matching_python_locations(relative, content, terms)
                 )
                 symbols.extend(file_symbols)
                 call_sites.extend(file_call_sites)
                 inheritance.extend(file_inheritance)
                 imports.extend(file_imports)
+                if ast_warning:
+                    ast_warnings.append(ast_warning)
         imports = self._resolve_local_imports(imports, documents)
+        warnings.extend(ast_warnings)
         ranked.sort(key=lambda item: (-item[0], item[1]))
         symbols.sort(key=lambda item: (-item["score"], item["path"], item["line"]))
         call_sites.sort(key=lambda item: (item["path"], item["line"], item["column"]))
@@ -163,11 +175,31 @@ class RepositoryContext:
     @staticmethod
     def _matching_python_locations(
         relative: str, content: str, terms: set[str]
-    ) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+    ) -> tuple[list[dict], list[dict], list[dict], list[dict], str | None]:
         try:
             tree = ast.parse(content, filename=relative)
         except (SyntaxError, RecursionError, ValueError):
-            return [], [], [], []
+            return [], [], [], [], None
+
+        nodes = [(tree, 1)]
+        node_count = 0
+        while nodes:
+            node, depth = nodes.pop()
+            node_count += 1
+            if node_count > MAX_PYTHON_AST_NODES:
+                return [], [], [], [], (
+                    f"Python AST analysis skipped for {relative}: "
+                    f"node limit exceeded ({MAX_PYTHON_AST_NODES})"
+                )
+            if depth > MAX_PYTHON_AST_DEPTH:
+                return [], [], [], [], (
+                    f"Python AST analysis skipped for {relative}: "
+                    f"nesting limit exceeded ({MAX_PYTHON_AST_DEPTH})"
+                )
+            nodes.extend(
+                (child, depth + 1)
+                for child in ast.iter_child_nodes(node)
+            )
 
         symbols = []
         call_sites = []
@@ -350,8 +382,11 @@ class RepositoryContext:
                         "_relative_level": relative_level,
                     })
 
-        PythonLocationVisitor().visit(tree)
-        return symbols, call_sites, inheritance, imports
+        try:
+            PythonLocationVisitor().visit(tree)
+        except RecursionError:
+            return [], [], [], [], f"Python AST analysis skipped for {relative}: traversal nesting is too deep"
+        return symbols, call_sites, inheritance, imports, None
 
     @staticmethod
     def _resolve_local_imports(imports: list[dict], documents: list[tuple]) -> list[dict]:

@@ -205,6 +205,37 @@ class RepositoryContextTests(unittest.TestCase):
         self.assertEqual("package/tasks.py", imported_module["resolved_path"])
         self.assertEqual(1, imported_module["resolved_line"])
 
+    def test_python_ast_node_limit_skips_analysis_with_warning(self):
+        (self.root / "large_ast.py").write_text(
+            "def dispatch_job():\n"
+            "    return scheduler.enqueue(payload)\n",
+            encoding="utf-8",
+        )
+
+        with patch("astra.repository.MAX_PYTHON_AST_NODES", 5):
+            result = RepositoryContext(self.root).search("dispatch_job")
+
+        self.assertEqual([], result["symbols"])
+        self.assertEqual([], result["call_sites"])
+        self.assertTrue(any("node limit exceeded (5)" in warning for warning in result["warnings"]))
+        self.assertEqual("large_ast.py", result["matches"][0]["path"])
+
+    def test_python_ast_depth_limit_skips_analysis_with_warning(self):
+        nested_expression = "[" * 20 + "target" + "]" * 20
+        (self.root / "nested_ast.py").write_text(
+            "value = " + nested_expression + "\n",
+            encoding="utf-8",
+        )
+
+        with patch("astra.repository.MAX_PYTHON_AST_DEPTH", 10):
+            result = RepositoryContext(self.root).search("value")
+
+        self.assertEqual([], result["symbols"])
+        self.assertTrue(
+            any("nesting limit exceeded (10)" in warning for warning in result["warnings"])
+        )
+        self.assertEqual("nested_ast.py", result["matches"][0]["path"])
+
     def test_no_match_does_not_inject_unrelated_project_source(self):
         (self.root / "core.py").write_text("def calculate_signal():\n    return 1\n", encoding="utf-8")
         self.assertEqual("", RepositoryContext(self.root).context_for("weather forecast"))
