@@ -516,6 +516,27 @@ class RepositoryContextTests(unittest.TestCase):
             ],
         )
 
+    def test_dependency_inventory_counts_same_line_import_uses(self):
+        (self.root / "same_line.py").write_text(
+            "import math; print(math.pi)\n"
+            "from math import sqrt; print(sqrt(4))\n",
+            encoding="utf-8",
+        )
+
+        report = RepositoryContext(self.root).dependencies()
+
+        self.assertEqual(
+            [
+                ("math", [{"path": "same_line.py", "line": 1, "column": 20}]),
+                ("math.sqrt", [{"path": "same_line.py", "line": 2, "column": 30}]),
+            ],
+            [
+                (item["imported_name"], item["references"])
+                for item in report["imports"]
+            ],
+        )
+        self.assertEqual([], report["issues"])
+
     def test_dependency_inventory_caps_imports_and_surfaces_warning(self):
         (self.root / "many_imports.py").write_text(
             "import alpha\nimport beta\n",

@@ -563,6 +563,7 @@ class RepositoryContext:
                         module_name=alias.name,
                         member_name=None,
                         relative_level=0,
+                        import_end_column=node.end_col_offset,
                     )
 
             def visit_ImportFrom(self, node):
@@ -582,6 +583,7 @@ class RepositoryContext:
                         module_name=node.module or "",
                         member_name=alias.name,
                         relative_level=node.level,
+                        import_end_column=node.end_col_offset,
                     )
 
             def _record_import(
@@ -592,6 +594,7 @@ class RepositoryContext:
                 module_name,
                 member_name,
                 relative_level,
+                import_end_column,
             ):
                 score = matching_score(imported_name)
                 nonlocal imports_truncated
@@ -607,6 +610,7 @@ class RepositoryContext:
                         "_module_name": module_name,
                         "_member_name": member_name,
                         "_relative_level": relative_level,
+                        "_import_end_column": import_end_column,
                     })
                 elif score or include_all_imports:
                     imports_truncated = True
@@ -654,6 +658,7 @@ class RepositoryContext:
                 record["line"],
                 record["path"],
                 references_by_path,
+                record["_import_end_column"],
             )
             path_parts = PurePosixPath(record["path"]).parent.parts
             level = record["_relative_level"]
@@ -753,6 +758,7 @@ class RepositoryContext:
         import_line: int,
         relative_path: str,
         references_by_path: dict[str, dict[str, list[dict]]],
+        import_end_column: int,
     ) -> list[dict]:
         if relative_path in references_by_path:
             references = references_by_path[relative_path]
@@ -760,6 +766,7 @@ class RepositoryContext:
                 reference
                 for reference in references.get(name, [])
                 if reference["line"] != import_line
+                or reference["column"] > import_end_column
             ][:100]
         try:
             tree = ast.parse(content, filename=relative_path)
@@ -784,6 +791,7 @@ class RepositoryContext:
             reference
             for reference in references.get(name, [])
             if reference["line"] != import_line
+            or reference["column"] > import_end_column
         ][:100]
 
     @staticmethod
