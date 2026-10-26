@@ -244,6 +244,7 @@ class RepositoryContext:
                 item["issue"] = None
             if (
                 item["issue"] is None
+                and not item["dynamic"]
                 and not item["wildcard"]
                 and item["local_name"] != "*"
                 and not item["local_name"].startswith("_")
@@ -253,6 +254,7 @@ class RepositoryContext:
             ):
                 item["issue"] = "possibly-unused-import"
 
+        dynamic_imports = sum(item["dynamic"] for item in imports)
         cycles = self._find_local_import_cycles(
             imports,
             {
@@ -285,6 +287,7 @@ class RepositoryContext:
                 "files_scanned": files_scanned,
                 "eligible_files": len(python_documents),
                 "imports_returned": len(imports),
+                "dynamic_imports": dynamic_imports,
                 "local": local_count,
                 "unresolved": unresolved_count,
                 "truncated": truncated,
@@ -537,6 +540,22 @@ class RepositoryContext:
 
             def visit_Call(self, node):
                 name = dotted_name(node.func)
+                if name in {"__import__", "importlib.import_module"} and node.args:
+                    try:
+                        module_name = ast.literal_eval(node.args[0])
+                    except (ValueError, TypeError):
+                        module_name = None
+                    if isinstance(module_name, str) and module_name and not module_name.startswith("."):
+                        self._record_import(
+                            module_name,
+                            None,
+                            node.lineno,
+                            module_name=module_name,
+                            member_name=None,
+                            relative_level=0,
+                            import_end_column=node.end_col_offset,
+                            dynamic=True,
+                        )
                 if name:
                     name_terms = {
                         token.lower() for token in TOKEN_RE.findall(name)
@@ -564,6 +583,7 @@ class RepositoryContext:
                         member_name=None,
                         relative_level=0,
                         import_end_column=node.end_col_offset,
+                        dynamic=False,
                     )
 
             def visit_ImportFrom(self, node):
@@ -584,6 +604,7 @@ class RepositoryContext:
                         member_name=alias.name,
                         relative_level=node.level,
                         import_end_column=node.end_col_offset,
+                        dynamic=False,
                     )
 
             def _record_import(
@@ -595,6 +616,7 @@ class RepositoryContext:
                 member_name,
                 relative_level,
                 import_end_column,
+                dynamic,
             ):
                 score = matching_score(imported_name)
                 nonlocal imports_truncated
@@ -607,6 +629,7 @@ class RepositoryContext:
                         "line": line,
                         "score": score,
                         "wildcard": member_name == "*",
+                        "dynamic": dynamic,
                         "_module_name": module_name,
                         "_member_name": member_name,
                         "_relative_level": relative_level,
@@ -760,6 +783,8 @@ class RepositoryContext:
         references_by_path: dict[str, dict[str, list[dict]]],
         import_end_column: int,
     ) -> list[dict]:
+        if not name:
+            return []
         if relative_path in references_by_path:
             references = references_by_path[relative_path]
             return [

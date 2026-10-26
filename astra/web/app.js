@@ -327,8 +327,10 @@
         const source = document.createElement("button");
         source.className = "ghost";
         source.type = "button";
-        source.textContent = imported.path + ":" + imported.line + " imports " +
-          imported.imported_name + " as " + imported.local_name +
+        source.textContent = imported.path + ":" + imported.line +
+          (imported.dynamic ? " dynamically loads " : " imports ") +
+          imported.imported_name +
+          (imported.dynamic ? "" : " as " + imported.local_name) +
           (imported.wildcard ? " (wildcard)" : "") +
           " [" + imported.status + "]" +
           (imported.issue ? " — " + imported.issue : "");
@@ -401,7 +403,8 @@
         " local and " + summary.unresolved + " unresolved import(s); " +
         missingCount + " likely missing local target(s), " +
         unusedCount + " possibly unused import(s), " +
-        data.cycles.length + " circular local import group(s).";
+        data.cycles.length + " circular local import group(s); " +
+        summary.dynamic_imports + " literal dynamic load(s).";
       if (summary.truncated) status.textContent += " Results were capped.";
       if (data.warnings.length) status.textContent += " " + data.warnings.join("; ");
       if (!summary.imports_returned) status.textContent += " No imports found.";

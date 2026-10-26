@@ -166,6 +166,7 @@ class RepositoryContextTests(unittest.TestCase):
                 "line": 1,
                 "score": 3,
                 "wildcard": False,
+                "dynamic": False,
                 "resolved_path": None,
                 "resolved_line": None,
                 "resolved_kind": None,
@@ -188,6 +189,7 @@ class RepositoryContextTests(unittest.TestCase):
                 "line": 2,
                 "score": 3,
                 "wildcard": False,
+                "dynamic": False,
                 "resolved_path": None,
                 "resolved_line": None,
                 "resolved_kind": None,
@@ -533,6 +535,34 @@ class RepositoryContextTests(unittest.TestCase):
             [
                 (item["imported_name"], item["references"])
                 for item in report["imports"]
+            ],
+        )
+        self.assertEqual([], report["issues"])
+
+    def test_dependency_inventory_finds_literal_dynamic_imports(self):
+        (self.root / "helper.py").write_text("value = 1\n", encoding="utf-8")
+        (self.root / "dynamic_loader.py").write_text(
+            'import importlib; importlib.import_module("helper")\n'
+            '__import__("external_plugin.worker")\n'
+            "importlib.import_module(resolve_module_name())\n",
+            encoding="utf-8",
+        )
+
+        report = RepositoryContext(self.root).dependencies()
+
+        dynamic_imports = [
+            item for item in report["imports"]
+            if item["dynamic"]
+        ]
+        self.assertEqual(2, report["summary"]["dynamic_imports"])
+        self.assertEqual(
+            [
+                ("helper", "local", "helper.py"),
+                ("external_plugin.worker", "unresolved-absolute", None),
+            ],
+            [
+                (item["imported_name"], item["status"], item["resolved_path"])
+                for item in dynamic_imports
             ],
         )
         self.assertEqual([], report["issues"])
