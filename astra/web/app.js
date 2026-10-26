@@ -315,6 +315,54 @@
     }
   });
 
+  $("project-dependencies").addEventListener("click", async () => {
+    const status = $("project-dependencies-status");
+    const results = $("project-dependencies-results");
+    status.textContent = "Inspecting bounded Python import declarations…";
+    results.replaceChildren();
+    try {
+      const data = await api("/api/project/dependencies");
+      for (const imported of data.imports) {
+        const item = document.createElement("li");
+        const source = document.createElement("button");
+        source.className = "ghost";
+        source.type = "button";
+        source.textContent = imported.path + ":" + imported.line + " imports " +
+          imported.imported_name + " as " + imported.local_name +
+          " [" + imported.status + "]";
+        source.addEventListener("click", () => {
+          openProjectLocation(imported.path, imported.line).catch(error => {
+            status.textContent = "Could not open import declaration: " + (error.message || String(error));
+          });
+        });
+        item.append(source);
+        if (imported.resolved_path) {
+          const target = document.createElement("button");
+          target.className = "ghost";
+          target.type = "button";
+          target.textContent = "Open " + imported.resolved_kind + " " +
+            imported.resolved_path + ":" + imported.resolved_line;
+          target.addEventListener("click", () => {
+            openProjectLocation(imported.resolved_path, imported.resolved_line).catch(error => {
+              status.textContent = "Could not open local import target: " + (error.message || String(error));
+            });
+          });
+          item.append(target);
+        }
+        results.append(item);
+      }
+      const summary = data.summary;
+      status.textContent = "Scanned " + summary.files_scanned + " of " +
+        summary.eligible_files + " Python file(s); " + summary.local +
+        " local and " + summary.unresolved + " unresolved import(s).";
+      if (summary.truncated) status.textContent += " Results were capped.";
+      if (data.warnings.length) status.textContent += " " + data.warnings.join("; ");
+      if (!summary.imports_returned) status.textContent += " No imports found.";
+    } catch (error) {
+      status.textContent = "Could not inspect project imports: " + (error.message || String(error));
+    }
+  });
+
   $("project-file-form").addEventListener("submit", async event => {
     event.preventDefault();
     const path = $("project-file-path").value.trim();

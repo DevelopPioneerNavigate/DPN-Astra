@@ -18,6 +18,9 @@ MAX_EXCERPT_LINES = 32
 MAX_EXCERPT_CHARS = 1_800
 MAX_PYTHON_AST_NODES = 50_000
 MAX_PYTHON_AST_DEPTH = 200
+MAX_PYTHON_IMPORTS_PER_FILE = 100
+MAX_PROJECT_IMPORTS = 1_000
+MAX_PROJECT_DEPENDENCY_FILES = 100
 
 SUPPORTED_SUFFIXES = {
     ".c", ".cc", ".cpp", ".cs", ".css", ".cxx", ".go", ".h", ".hpp",
@@ -172,9 +175,80 @@ class RepositoryContext:
             "warnings": warnings,
         }
 
+    def dependencies(self) -> dict:
+        self.permissions.require_read()
+        documents, warnings = self._read_documents()
+        python_documents = [
+            document for document in documents
+            if Path(document[0]).suffix.lower() == ".py"
+        ]
+        import_records = []
+        ast_warnings = []
+        truncated = False
+        files_scanned = 0
+        for index, (relative, content, _) in enumerate(python_documents):
+            if files_scanned >= MAX_PROJECT_DEPENDENCY_FILES:
+                truncated = True
+                warnings.append(
+                    "Python dependency inventory file limit reached "
+                    f"({MAX_PROJECT_DEPENDENCY_FILES})"
+                )
+                break
+            files_scanned += 1
+            (
+                _symbols,
+                _call_sites,
+                _inheritance,
+                file_imports,
+                ast_warning,
+            ) = self._matching_python_locations(
+                relative, content, set(), include_all_imports=True
+            )
+            if ast_warning:
+                ast_warnings.append(ast_warning)
+                if "import analysis truncated" in ast_warning:
+                    truncated = True
+            remaining = MAX_PROJECT_IMPORTS - len(import_records)
+            import_records.extend(file_imports[:remaining])
+            if len(file_imports) > remaining:
+                truncated = True
+                break
+            if len(import_records) >= MAX_PROJECT_IMPORTS:
+                truncated = index + 1 < len(python_documents)
+                break
+
+        imports = self._resolve_local_imports(import_records, documents)
+        imports.sort(key=lambda item: (item["path"], item["line"], item["imported_name"]))
+        for item in imports:
+            if item["resolved_path"]:
+                item["status"] = "local"
+            elif item["imported_name"].startswith("."):
+                item["status"] = "unresolved-relative"
+            else:
+                item["status"] = "unresolved-absolute"
+
+        warnings.extend(ast_warnings)
+        local_count = sum(item["status"] == "local" for item in imports)
+        unresolved_count = len(imports) - local_count
+        return {
+            "imports": imports,
+            "summary": {
+                "files_scanned": files_scanned,
+                "eligible_files": len(python_documents),
+                "imports_returned": len(imports),
+                "local": local_count,
+                "unresolved": unresolved_count,
+                "truncated": truncated,
+            },
+            "warnings": warnings,
+        }
+
     @staticmethod
     def _matching_python_locations(
-        relative: str, content: str, terms: set[str]
+        relative: str,
+        content: str,
+        terms: set[str],
+        include_all_imports: bool = False,
     ) -> tuple[list[dict], list[dict], list[dict], list[dict], str | None]:
         try:
             tree = ast.parse(content, filename=relative)
@@ -207,6 +281,7 @@ class RepositoryContext:
         imports = []
         scopes = []
         scope_kinds = []
+        imports_truncated = False
 
         def dotted_name(node):
             if isinstance(node, ast.Name):
@@ -369,7 +444,8 @@ class RepositoryContext:
                 relative_level,
             ):
                 score = matching_score(imported_name)
-                if score:
+                nonlocal imports_truncated
+                if (score or include_all_imports) and len(imports) < MAX_PYTHON_IMPORTS_PER_FILE:
                     imports.append({
                         "path": relative,
                         "imported_name": imported_name,
@@ -381,12 +457,20 @@ class RepositoryContext:
                         "_member_name": member_name,
                         "_relative_level": relative_level,
                     })
+                elif score or include_all_imports:
+                    imports_truncated = True
 
         try:
             PythonLocationVisitor().visit(tree)
         except RecursionError:
             return [], [], [], [], f"Python AST analysis skipped for {relative}: traversal nesting is too deep"
-        return symbols, call_sites, inheritance, imports, None
+        warning = (
+            f"Python import analysis truncated for {relative}: "
+            f"limit is {MAX_PYTHON_IMPORTS_PER_FILE} imports"
+            if imports_truncated
+            else None
+        )
+        return symbols, call_sites, inheritance, imports, warning
 
     @staticmethod
     def _resolve_local_imports(imports: list[dict], documents: list[tuple]) -> list[dict]:

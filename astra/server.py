@@ -92,6 +92,14 @@ def make_handler(core: AstraCore):
                     self._send(200, core.repository.search(query))
                 except ValueError as exc:
                     self._send(400, {"error": str(exc)})
+            elif url.path == "/api/project/dependencies":
+                if core.repository is None:
+                    self._send(404, {"error": "Read-only project context is not enabled"})
+                    return
+                try:
+                    self._send(200, core.repository.dependencies())
+                except OSError as exc:
+                    self._send(500, {"error": f"Could not inspect project dependencies: {exc.strerror or str(exc)}"})
             elif url.path == "/api/project/file":
                 if core.repository is None:
                     self._send(404, {"error": "Read-only project context is not enabled"})

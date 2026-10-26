@@ -297,6 +297,65 @@ class RepositoryContextTests(unittest.TestCase):
         )
         self.assertEqual("nested_ast.py", result["matches"][0]["path"])
 
+    def test_dependency_inventory_summarizes_local_and_unresolved_imports(self):
+        package = self.root / "package"
+        package.mkdir()
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "tasks.py").write_text(
+            "def dispatch_job():\n"
+            "    return None\n",
+            encoding="utf-8",
+        )
+        (package / "consumer.py").write_text(
+            "from .tasks import dispatch_job\n"
+            "import third_party.client\n"
+            "from .missing import unavailable\n",
+            encoding="utf-8",
+        )
+
+        report = RepositoryContext(self.root).dependencies()
+
+        imports = report["imports"]
+        self.assertEqual(3, report["summary"]["imports_returned"])
+        self.assertEqual(1, report["summary"]["local"])
+        self.assertEqual(2, report["summary"]["unresolved"])
+        self.assertFalse(report["summary"]["truncated"])
+        self.assertEqual(
+            [
+                (".tasks.dispatch_job", "local", "package/tasks.py"),
+                ("third_party.client", "unresolved-absolute", None),
+                (".missing.unavailable", "unresolved-relative", None),
+            ],
+            [
+                (item["imported_name"], item["status"], item["resolved_path"])
+                for item in imports
+            ],
+        )
+
+    def test_dependency_inventory_caps_imports_and_surfaces_warning(self):
+        (self.root / "many_imports.py").write_text(
+            "import alpha\nimport beta\n",
+            encoding="utf-8",
+        )
+        with patch("astra.repository.MAX_PYTHON_IMPORTS_PER_FILE", 1):
+            report = RepositoryContext(self.root).dependencies()
+
+        self.assertEqual(1, report["summary"]["imports_returned"])
+        self.assertTrue(report["summary"]["truncated"])
+        self.assertTrue(any("limit is 1 imports" in warning for warning in report["warnings"]))
+
+    def test_dependency_inventory_caps_python_files_and_surfaces_warning(self):
+        for name in ("a.py", "b.py"):
+            (self.root / name).write_text("import json\n", encoding="utf-8")
+
+        with patch("astra.repository.MAX_PROJECT_DEPENDENCY_FILES", 1):
+            report = RepositoryContext(self.root).dependencies()
+
+        self.assertEqual(1, report["summary"]["files_scanned"])
+        self.assertEqual(2, report["summary"]["eligible_files"])
+        self.assertTrue(report["summary"]["truncated"])
+        self.assertTrue(any("file limit reached (1)" in warning for warning in report["warnings"]))
+
     def test_no_match_does_not_inject_unrelated_project_source(self):
         (self.root / "core.py").write_text("def calculate_signal():\n    return 1\n", encoding="utf-8")
         self.assertEqual("", RepositoryContext(self.root).context_for("weather forecast"))
@@ -515,6 +574,16 @@ class ProjectApiTests(unittest.TestCase):
         status, result = self.get_json("/api/project/files")
         self.assertEqual(200, status)
         self.assertEqual("engine.py", result["files"][0]["path"])
+
+    def test_project_dependency_inventory_http_endpoint(self):
+        (self.root / "engine.py").write_text("import json\n", encoding="utf-8")
+
+        status, result = self.get_json("/api/project/dependencies")
+
+        self.assertEqual(200, status)
+        self.assertEqual(1, result["summary"]["imports_returned"])
+        self.assertEqual("json", result["imports"][0]["imported_name"])
+        self.assertEqual("unresolved-absolute", result["imports"][0]["status"])
 
     def test_project_search_returns_clickable_call_site_locations(self):
         (self.root / "engine.py").write_text(
