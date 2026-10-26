@@ -368,6 +368,27 @@
         item.append(button);
         results.append(item);
       }
+      for (const cycle of data.cycles) {
+        const group = document.createElement("li");
+        const heading = document.createElement("span");
+        heading.textContent = "Circular local imports: " + cycle.paths.join(" ↔ ");
+        group.append(heading);
+        for (const imported of cycle.imports) {
+          const button = document.createElement("button");
+          button.className = "ghost";
+          button.type = "button";
+          button.textContent = imported.path + ":" + imported.line +
+            " imports " + imported.target_path;
+          button.addEventListener("click", () => {
+            openProjectLocation(imported.path, imported.line).catch(error => {
+              status.textContent = "Could not open circular import: " +
+                (error.message || String(error));
+            });
+          });
+          group.append(button);
+        }
+        results.append(group);
+      }
       const summary = data.summary;
       const missingCount = data.issues.filter(issue =>
         issue.issue === "missing-local-target"
@@ -379,7 +400,8 @@
         summary.eligible_files + " Python file(s); " + summary.local +
         " local and " + summary.unresolved + " unresolved import(s); " +
         missingCount + " likely missing local target(s), " +
-        unusedCount + " possibly unused import(s).";
+        unusedCount + " possibly unused import(s), " +
+        data.cycles.length + " circular local import group(s).";
       if (summary.truncated) status.textContent += " Results were capped.";
       if (data.warnings.length) status.textContent += " " + data.warnings.join("; ");
       if (!summary.imports_returned) status.textContent += " No imports found.";

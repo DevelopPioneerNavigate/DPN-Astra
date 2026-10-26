@@ -253,11 +253,19 @@ class RepositoryContext:
             ):
                 item["issue"] = "possibly-unused-import"
 
+        cycles = self._find_local_import_cycles(
+            imports,
+            {
+                relative
+                for relative, _, _ in python_documents[:files_scanned]
+            },
+        )
         warnings.extend(ast_warnings)
         local_count = sum(item["status"] == "local" for item in imports)
         unresolved_count = len(imports) - local_count
         return {
             "imports": imports,
+            "cycles": cycles,
             "issues": [
                 {
                     "path": item["path"],
@@ -283,6 +291,68 @@ class RepositoryContext:
             },
             "warnings": warnings,
         }
+
+    @staticmethod
+    def _find_local_import_cycles(imports: list[dict], scanned_paths: set[str]) -> list[dict]:
+        graph = {path: set() for path in scanned_paths}
+        edges = []
+        for item in imports:
+            target = item["resolved_path"]
+            source = item["path"]
+            if item["status"] == "local" and target in scanned_paths:
+                graph[source].add(target)
+                edges.append({
+                    "path": source,
+                    "line": item["line"],
+                    "target_path": target,
+                })
+
+        index = 0
+        indices = {}
+        lowlinks = {}
+        stack = []
+        on_stack = set()
+        components = []
+
+        def visit(node):
+            nonlocal index
+            indices[node] = index
+            lowlinks[node] = index
+            index += 1
+            stack.append(node)
+            on_stack.add(node)
+            for target in sorted(graph[node]):
+                if target not in indices:
+                    visit(target)
+                    lowlinks[node] = min(lowlinks[node], lowlinks[target])
+                elif target in on_stack:
+                    lowlinks[node] = min(lowlinks[node], indices[target])
+            if lowlinks[node] == indices[node]:
+                component = []
+                while True:
+                    member = stack.pop()
+                    on_stack.remove(member)
+                    component.append(member)
+                    if member == node:
+                        break
+                if len(component) > 1 or node in graph[node]:
+                    components.append(sorted(component))
+
+        for node in sorted(graph):
+            if node not in indices:
+                visit(node)
+
+        components.sort(key=lambda component: component[0])
+        return [
+            {
+                "paths": component,
+                "imports": [
+                    edge for edge in edges
+                    if edge["path"] in component and edge["target_path"] in component
+                ],
+            }
+            for component in components
+        ]
 
     @staticmethod
     def _declares_all(content: str) -> bool:

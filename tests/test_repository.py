@@ -442,6 +442,37 @@ class RepositoryContextTests(unittest.TestCase):
             report["summary"]["local"],
         )
 
+    def test_dependency_inventory_reports_circular_local_import_groups(self):
+        (self.root / "alpha.py").write_text(
+            "from beta import beta_value\n"
+            "alpha_value = 1\n",
+            encoding="utf-8",
+        )
+        (self.root / "beta.py").write_text(
+            "from alpha import alpha_value\n"
+            "beta_value = 2\n",
+            encoding="utf-8",
+        )
+        (self.root / "consumer.py").write_text(
+            "from beta import beta_value\n",
+            encoding="utf-8",
+        )
+
+        report = RepositoryContext(self.root).dependencies()
+
+        self.assertEqual(
+            [
+                {
+                    "paths": ["alpha.py", "beta.py"],
+                    "imports": [
+                        {"path": "alpha.py", "line": 1, "target_path": "beta.py"},
+                        {"path": "beta.py", "line": 1, "target_path": "alpha.py"},
+                    ],
+                }
+            ],
+            report["cycles"],
+        )
+
     def test_dependency_inventory_reports_possible_unused_imports_conservatively(self):
         package = self.root / "package"
         package.mkdir()
