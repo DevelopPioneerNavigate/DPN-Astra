@@ -38,6 +38,29 @@
     notice.textContent = "Notice: " + (error.message || String(error));
   }
 
+  async function openProjectLocation(path, line) {
+    const file = await api("/api/project/file?path=" + encodeURIComponent(path));
+    $("project-file-path").value = file.path;
+    $("project-file-content").value = file.content;
+    $("project-file-content").disabled = false;
+    $("project-propose").disabled = false;
+    $("project-validate").disabled = false;
+    const editor = $("project-file-content");
+    if (line) {
+      const lines = file.content.split("\n");
+      const offset = lines.slice(0, Math.max(0, line - 1)).join("\n").length + (line > 1 ? 1 : 0);
+      editor.focus();
+      editor.setSelectionRange(offset, offset);
+      const lineHeight = parseFloat(getComputedStyle(editor).lineHeight) || 16;
+      editor.scrollTop = Math.max(0, (line - 1) * lineHeight);
+    } else {
+      editor.focus();
+      editor.setSelectionRange(0, 0);
+    }
+    $("project-change-status").textContent = "Opened " + file.path +
+      (line ? " at line " + line : "") + ". Editing is staged only.";
+  }
+
   async function refreshStatus() {
     try {
       const status = await api("/api/status");
@@ -267,7 +290,24 @@
             "syntax error" +
             (result.error.line ? " at " + result.error.line + ":" + result.error.column : "") +
             ": " + result.error.message);
-        item.textContent = result.path + " — " + detail;
+        if (result.error.message.startsWith("Skipped:")) {
+          item.textContent = result.path + " — " + detail;
+        } else {
+          const link = document.createElement("button");
+          link.type = "button";
+          link.className = "ghost";
+          link.textContent = result.path + " — " + detail;
+          link.setAttribute("aria-label", "Open " + result.path +
+            (result.error.line ? " at line " + result.error.line : ""));
+          link.addEventListener("click", async () => {
+            try {
+              await openProjectLocation(result.path, result.error.line);
+            } catch (error) {
+              summary.textContent = "Could not open diagnostic source: " + (error.message || String(error));
+            }
+          });
+          item.append(link);
+        }
         results.append(item);
       }
       if (report.truncated) summary.textContent += " Only the first 100 diagnostics are listed.";
