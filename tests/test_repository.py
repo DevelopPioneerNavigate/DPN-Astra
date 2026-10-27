@@ -516,6 +516,47 @@ class RepositoryContextTests(unittest.TestCase):
         self.assertEqual(2, report["summary"]["type_checking_imports"])
         self.assertEqual([], report["cycles"])
 
+    def test_importerror_fallback_imports_are_marked_optional(self):
+        (self.root / "project_plugin.py").write_text(
+            "value = 1\n",
+            encoding="utf-8",
+        )
+        (self.root / "fallbacks.py").write_text(
+            "try:\n"
+            "    import project_plugin.missing\n"
+            "except (ImportError, ModuleNotFoundError):\n"
+            "    project_plugin = None\n"
+            "try:\n"
+            "    import optional_package\n"
+            "except ImportError:\n"
+            "    optional_package = None\n"
+            "if optional_package:\n"
+            "    print(optional_package)\n"
+            "import project_plugin.absent\n",
+            encoding="utf-8",
+        )
+
+        report = RepositoryContext(self.root).dependencies()
+
+        imports_by_name = {
+            item["imported_name"]: item
+            for item in report["imports"]
+            if item["path"] == "fallbacks.py"
+        }
+        self.assertTrue(imports_by_name["project_plugin.missing"]["optional"])
+        self.assertEqual(
+            "optional-missing-target",
+            imports_by_name["project_plugin.missing"]["issue"],
+        )
+        self.assertTrue(imports_by_name["optional_package"]["optional"])
+        self.assertIsNone(imports_by_name["optional_package"]["issue"])
+        self.assertFalse(imports_by_name["project_plugin.absent"]["optional"])
+        self.assertEqual(2, report["summary"]["optional_imports"])
+        self.assertEqual(
+            ["project_plugin.missing", "project_plugin.absent"],
+            [issue["imported_name"] for issue in report["issues"]],
+        )
+
     def test_dependency_inventory_reports_possible_unused_imports_conservatively(self):
         package = self.root / "package"
         package.mkdir()

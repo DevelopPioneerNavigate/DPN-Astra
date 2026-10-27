@@ -332,6 +332,7 @@
           imported.imported_name +
           (imported.dynamic ? "" : " as " + imported.local_name) +
           (imported.type_checking ? " (TYPE_CHECKING)" : "") +
+          (imported.optional ? " (ImportError fallback)" : "") +
           (imported.wildcard ? " (wildcard)" : "") +
           " [" + imported.status + "]" +
           (imported.issue ? " — " + imported.issue : "");
@@ -396,6 +397,9 @@
       const missingCount = data.issues.filter(issue =>
         issue.issue === "missing-local-target"
       ).length;
+      const optionalMissingCount = data.issues.filter(issue =>
+        issue.issue === "optional-missing-target"
+      ).length;
       const unusedCount = data.issues.filter(issue =>
         issue.issue === "possibly-unused-import"
       ).length;
@@ -403,6 +407,7 @@
         summary.eligible_files + " Python file(s); " + summary.local +
         " local and " + summary.unresolved + " unresolved import(s); " +
         missingCount + " likely missing local target(s), " +
+        optionalMissingCount + " optional fallback target(s), " +
         unusedCount + " possibly unused import(s), " +
         data.cycles.length + " circular local import group(s); " +
         summary.dynamic_imports + " literal dynamic load(s); " +

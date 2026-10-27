@@ -247,10 +247,18 @@ class RepositoryContext:
                 item["issue"] = None
             elif item["imported_name"].startswith("."):
                 item["status"] = "unresolved-relative"
-                item["issue"] = "missing-local-target"
+                item["issue"] = (
+                    "optional-missing-target"
+                    if item["optional"]
+                    else "missing-local-target"
+                )
             elif self._has_local_import_root(module_name, documents):
                 item["status"] = "unresolved-local"
-                item["issue"] = "missing-local-target"
+                item["issue"] = (
+                    "optional-missing-target"
+                    if item["optional"]
+                    else "missing-local-target"
+                )
             else:
                 item["status"] = "unresolved-absolute"
                 item["issue"] = None
@@ -268,6 +276,7 @@ class RepositoryContext:
 
         dynamic_imports = sum(item["dynamic"] for item in imports)
         type_checking_imports = sum(item["type_checking"] for item in imports)
+        optional_imports = sum(item["optional"] for item in imports)
         cycles = self._find_local_import_cycles(
             imports,
             {
@@ -290,6 +299,8 @@ class RepositoryContext:
                     "message": (
                         "Local import target could not be resolved"
                         if item["issue"] == "missing-local-target"
+                        else "Optional import target could not be resolved"
+                        if item["issue"] == "optional-missing-target"
                         else "Imported name has no detected lexical uses"
                     ),
                 }
@@ -302,6 +313,7 @@ class RepositoryContext:
                 "imports_returned": len(imports),
                 "dynamic_imports": dynamic_imports,
                 "type_checking_imports": type_checking_imports,
+                "optional_imports": optional_imports,
                 "local": local_count,
                 "unresolved": unresolved_count,
                 "truncated": truncated,
@@ -484,6 +496,7 @@ class RepositoryContext:
                     if alias.name == "TYPE_CHECKING":
                         type_checking_names.add(alias.asname or alias.name)
         type_checking_stack = [False]
+        optional_import_stack = [False]
 
         def dotted_name(node):
             if isinstance(node, ast.Name):
@@ -502,6 +515,41 @@ class RepositoryContext:
             ) if matched_terms else 0
 
         class PythonLocationVisitor(ast.NodeVisitor):
+            @staticmethod
+            def _catches_import_error(handler):
+                if handler.type is None:
+                    return False
+                exception_names = (
+                    handler.type.elts
+                    if isinstance(handler.type, ast.Tuple)
+                    else [handler.type]
+                )
+                return any(
+                    dotted_name(exception) in {"ImportError", "ModuleNotFoundError"}
+                    for exception in exception_names
+                )
+
+            def visit_Try(self, node):
+                catches_import_error = any(
+                    self._catches_import_error(handler)
+                    for handler in node.handlers
+                )
+                optional_import_stack.append(
+                    optional_import_stack[-1] or catches_import_error
+                )
+                for statement in node.body:
+                    self.visit(statement)
+                optional_import_stack.pop()
+                for handler in node.handlers:
+                    self.visit(handler)
+                for statement in node.orelse:
+                    self.visit(statement)
+                for statement in node.finalbody:
+                    self.visit(statement)
+
+            def visit_TryStar(self, node):
+                self.visit_Try(node)
+
             def visit_If(self, node):
                 self.visit(node.test)
                 is_type_checking = dotted_name(node.test) in type_checking_names
@@ -775,6 +823,7 @@ class RepositoryContext:
                         "_relative_level": relative_level,
                         "_import_end_column": import_end_column,
                         "_type_checking": type_checking_stack[-1],
+                        "_optional": optional_import_stack[-1],
                     })
                 elif score or include_all_imports:
                     imports_truncated = True
@@ -817,6 +866,7 @@ class RepositoryContext:
             if include_module_name:
                 result["_module_name"] = record["_module_name"]
                 result["type_checking"] = record["_type_checking"]
+                result["optional"] = record["_optional"]
             result["references"] = RepositoryContext._find_lexical_references(
                 contents.get(record["path"], ""),
                 record["local_name"],
