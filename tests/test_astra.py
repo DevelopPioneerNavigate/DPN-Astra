@@ -1,4 +1,10 @@
+from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
+import json
+import os
+import stat
 import tempfile
+from threading import Thread
 import unittest
 from pathlib import Path
 from unittest.mock import Mock
@@ -8,6 +14,7 @@ from astra.command import CommandDenied, execute
 from astra.config import Config
 from astra.core import AstraCore
 from astra.provider import ModelError
+from astra.server import make_handler
 
 
 class AstraTests(unittest.TestCase):
@@ -70,6 +77,76 @@ class AstraTests(unittest.TestCase):
         with patch.dict("os.environ", {"ASTRA_OLLAMA_URL": "http://remote.example:11434"}):
             with self.assertRaises(ValueError):
                 Config.from_env()
+
+    def test_config_prepares_persistent_data_directory(self):
+        data_dir = Path(self.tmp.name) / "nested" / "astra-data"
+        config = Config(data_dir=data_dir)
+
+        prepared = config.prepare_data_dir()
+
+        self.assertEqual(data_dir.resolve(), prepared)
+        self.assertTrue(prepared.is_dir())
+        self.assertEqual(prepared, config.prepare_data_dir())
+        if os.name == "posix":
+            self.assertEqual(0o700, stat.S_IMODE(prepared.stat().st_mode))
+            self.assertEqual(0o700, stat.S_IMODE(prepared.parent.stat().st_mode))
+
+    def test_data_directory_path_must_not_be_a_file(self):
+        file_path = Path(self.tmp.name) / "not-a-directory"
+        file_path.write_text("existing data", encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            Config(data_dir=file_path).prepare_data_dir()
+
+    def test_liveness_and_readiness_health_endpoints(self):
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", 0), make_handler(self.core)
+        )
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        connection = HTTPConnection(
+            "127.0.0.1", server.server_address[1], timeout=2
+        )
+        self.addCleanup(connection.close)
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join)
+        self.addCleanup(server.shutdown)
+        host = f"127.0.0.1:{server.server_address[1]}"
+
+        connection.request("GET", "/health/live", headers={"Host": host})
+        live = connection.getresponse()
+        self.assertEqual(200, live.status)
+        self.assertEqual({"status": "alive"}, json.loads(live.read()))
+        self.provider.health.assert_not_called()
+
+        connection.request(
+            "GET",
+            "/health/live",
+            headers={"Host": f"untrusted.example:{server.server_address[1]}"},
+        )
+        rejected = connection.getresponse()
+        self.assertEqual(403, rejected.status)
+        rejected.read()
+
+        self.provider.health.return_value = {
+            "connected": False,
+            "model_installed": False,
+            "installed_models": [],
+        }
+        connection.request("GET", "/health/ready", headers={"Host": host})
+        unavailable = connection.getresponse()
+        self.assertEqual(503, unavailable.status)
+        self.assertEqual({"status": "not_ready"}, json.loads(unavailable.read()))
+
+        self.provider.health.return_value = {
+            "connected": True,
+            "model_installed": True,
+            "installed_models": ["test-model"],
+        }
+        connection.request("GET", "/health/ready", headers={"Host": host})
+        ready = connection.getresponse()
+        self.assertEqual(200, ready.status)
+        self.assertEqual({"status": "ready"}, json.loads(ready.read()))
 
 
     def test_ollama_latest_tag_is_recognized(self):

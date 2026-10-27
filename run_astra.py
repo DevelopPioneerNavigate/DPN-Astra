@@ -9,11 +9,12 @@ from astra.server import serve
 
 def main():
     config = Config.from_env()
-    archive = Archive(config.data_dir / "astra_memory.sqlite3")
+    data_dir = config.prepare_data_dir()
+    archive = Archive(data_dir / "astra_memory.sqlite3")
     repository = (
         RepositoryContext(
             config.project_dir,
-            audit_path=config.data_dir / "astra_project_audit.sqlite3",
+            audit_path=data_dir / "astra_project_audit.sqlite3",
         )
         if config.project_dir
         else None

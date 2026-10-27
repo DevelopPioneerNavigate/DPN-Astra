@@ -68,7 +68,16 @@ def make_handler(core: AstraCore):
                 self._headers(200, mime, len(blob))
                 self.wfile.write(blob)
                 return
-            if url.path == "/api/status":
+            if url.path == "/health/live":
+                self._send(200, {"status": "alive"})
+            elif url.path == "/health/ready":
+                health = core.provider.health()
+                ready = health["connected"] and health["model_installed"]
+                self._send(
+                    200 if ready else 503,
+                    {"status": "ready" if ready else "not_ready"},
+                )
+            elif url.path == "/api/status":
                 self._send(200, core.status())
             elif url.path == "/api/history":
                 try:

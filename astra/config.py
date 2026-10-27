@@ -13,6 +13,28 @@ class Config:
     port: int = 8766
     project_dir: Path | None = None
 
+    def prepare_data_dir(self) -> Path:
+        """Create and return the persistent data directory with private defaults."""
+        path = self.data_dir.expanduser()
+        missing = []
+        ancestor = path
+        while not ancestor.exists():
+            missing.append(ancestor)
+            parent = ancestor.parent
+            if parent == ancestor:
+                raise ValueError("ASTRA_DATA_DIR must point to a directory")
+            ancestor = parent
+        if not ancestor.is_dir():
+            raise ValueError("ASTRA_DATA_DIR must point to a directory")
+
+        for directory in reversed(missing):
+            try:
+                directory.mkdir(mode=0o700)
+            except FileExistsError:
+                if not directory.is_dir():
+                    raise ValueError("ASTRA_DATA_DIR must point to a directory")
+        return path.resolve()
+
     @classmethod
     def from_env(cls) -> "Config":
         model = os.getenv("ASTRA_MODEL", "llama3.2").strip()
@@ -32,7 +54,9 @@ class Config:
         return cls(
             model=model,
             ollama_url=url,
-            data_dir=Path(os.getenv("ASTRA_DATA_DIR", str(Path.home() / ".dpn-astra"))).expanduser(),
+            data_dir=Path(
+                os.getenv("ASTRA_DATA_DIR", str(Path.home() / ".dpn-astra"))
+            ).expanduser(),
             port=port,
             project_dir=project_dir,
         )
