@@ -1,0 +1,40 @@
+name: ASTRA weekly development reminder
+
+on:
+  schedule:
+    - cron: "0 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  reminder:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or update the development reminder
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_ACTOR: ${{ github.actor }}
+        run: |
+          title="ASTRA development follow-up"
+          issue_url="$(gh issue list \
+            --repo "$GH_REPOSITORY" \
+            --state open \
+            --search "$title in:title" \
+            --json title,url \
+            --jq '.[] | select(.title == "ASTRA development follow-up") | .url' \
+            | head -n 1)"
+
+          if [ -z "$issue_url" ]; then
+            gh issue create \
+              --repo "$GH_REPOSITORY" \
+              --title "$title" \
+              --assignee "$GH_ACTOR" \
+              --body "Weekly reminder to continue development guided by master directive #2. This automation only creates or comments on this reminder issue; it does not run code, edit branches, or create commits."
+          else
+            gh issue edit "$issue_url" --add-assignee "$GH_ACTOR"
+            gh issue comment "$issue_url" \
+              --body "Weekly reminder: resume ASTRA development from the current roadmap and master directive #2. This workflow does not run code, edit branches, or create commits."
+          fi
