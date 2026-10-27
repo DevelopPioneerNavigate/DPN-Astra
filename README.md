@@ -69,6 +69,8 @@ The Project Inspector's **Inspect Python imports** view lists bounded Python imp
 
 For explicit `from module import name` checks, a declared `__all__` is not treated as proof that the named attribute exists; only a statically detected symbol, re-export, submodule, or module-level `__getattr__` can satisfy the check. Dynamic `__all__` declarations remain outside static analysis.
 
+For possibly-unused-import hints, a single literal `__all__` list, tuple, or set exempts only imported names it contains. Computed, mutated, conditional, or otherwise ambiguous `__all__` declarations retain the conservative module-wide exclusion; this remains a static heuristic.
+
 If a model is missing or Ollama is stopped, ASTRA reports the real error; it never fabricates a model response.
 
 When `ASTRA_PROJECT_DIR` is enabled, ASTRA stores project-change lifecycle metadata (staged, applied, rolled back, expired) in `ASTRA_DATA_DIR/astra_project_audit.sqlite3`; only the latest 100 events are returned per request, while the ledger itself is retained without automatic truncation. It stores paths, proposal IDs, timestamps, states, and hashes, never source contents. The ledger has a SHA-256 hash chain that can reveal accidental or unsophisticated modification, but it is not authenticated or tamper-proof: someone able to rewrite the database can also recompute the chain. Without a configured project directory, history is process-local and capped at 100 events.

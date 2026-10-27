@@ -666,6 +666,47 @@ class RepositoryContextTests(unittest.TestCase):
             ],
         )
 
+    def test_dependency_inventory_checks_literal_all_members_for_unused_imports(self):
+        (self.root / "helpers.py").write_text(
+            "public_name = 1\n"
+            "accidental = 2\n"
+            "dynamic_name = 3\n"
+            "mutated_name = 4\n"
+            "conditional_name = 5\n",
+            encoding="utf-8",
+        )
+        (self.root / "exports.py").write_text(
+            "from helpers import public_name as public\n"
+            "from helpers import accidental\n"
+            '__all__ = ["public"]\n',
+            encoding="utf-8",
+        )
+        (self.root / "dynamic_exports.py").write_text(
+            "from helpers import dynamic_name\n"
+            "__all__ = build_exports()\n",
+            encoding="utf-8",
+        )
+        (self.root / "mutated_exports.py").write_text(
+            "from helpers import mutated_name\n"
+            '__all__ = ["mutated_name"]; __all__.append("other")\n',
+            encoding="utf-8",
+        )
+        (self.root / "conditional_exports.py").write_text(
+            "from helpers import conditional_name\n"
+            'if flag:\n    __all__ = ["conditional_name"]\n',
+            encoding="utf-8",
+        )
+
+        report = RepositoryContext(self.root).dependencies()
+
+        self.assertEqual(
+            [("exports.py", "helpers.accidental", "possibly-unused-import")],
+            [
+                (issue["path"], issue["imported_name"], issue["issue"])
+                for issue in report["issues"]
+            ],
+        )
+
     def test_dependency_inventory_counts_same_line_import_uses(self):
         (self.root / "same_line.py").write_text(
             "import math; print(math.pi)\n"

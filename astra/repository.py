@@ -239,9 +239,10 @@ class RepositoryContext:
             module_name = item.pop("_module_name")
             member_resolved = item.pop("_member_resolved")
             if item["path"] not in exports_cache:
-                exports_cache[item["path"]] = self._declares_all(
+                exports_cache[item["path"]] = self._declared_all_names(
                     contents.get(item["path"], "")
                 )
+            has_all, all_names = exports_cache[item["path"]]
             if item["resolved_path"] and member_resolved:
                 item["status"] = "local"
                 item["issue"] = None
@@ -270,7 +271,13 @@ class RepositoryContext:
                 and not item["local_name"].startswith("_")
                 and not item["path"].endswith("/__init__.py")
                 and not item["references"]
-                and not exports_cache[item["path"]]
+                and not (
+                    has_all
+                    and (
+                        all_names is None
+                        or item["local_name"] in all_names
+                    )
+                )
             ):
                 item["issue"] = "possibly-unused-import"
 
@@ -384,21 +391,115 @@ class RepositoryContext:
         ]
 
     @staticmethod
-    def _declares_all(content: str) -> bool:
+    def _declared_all_names(content: str) -> tuple[bool, frozenset[str] | None]:
         try:
             tree = ast.parse(content)
         except (SyntaxError, RecursionError, ValueError):
-            return True
+            return True, None
+
+        declarations = []
+        supported_targets = set()
+        supported_assignments = set()
         for node in tree.body:
-            targets = []
-            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            if any(
-                isinstance(target, ast.Name) and target.id == "__all__"
-                for target in targets
+            if isinstance(node, ast.Assign) and any(
+                RepositoryContext._target_binds_name(target, "__all__")
+                for target in node.targets
             ):
-                return True
-        return False
+                if (
+                    len(node.targets) != 1
+                    or not isinstance(node.targets[0], ast.Name)
+                    or node.targets[0].id != "__all__"
+                ):
+                    return True, None
+                declarations.append(node.value)
+                supported_targets.add(id(node.targets[0]))
+                supported_assignments.add(id(node))
+            elif (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == "__all__"
+            ):
+                if node.value is None:
+                    return True, None
+                declarations.append(node.value)
+                supported_targets.add(id(node.target))
+                supported_assignments.add(id(node))
+            elif (
+                isinstance(node, ast.AugAssign)
+                and RepositoryContext._target_binds_name(node.target, "__all__")
+            ):
+                return True, None
+            elif isinstance(node, ast.Delete) and any(
+                RepositoryContext._target_binds_name(target, "__all__")
+                for target in node.targets
+            ):
+                return True, None
+            elif RepositoryContext._import_binds_name(node, "__all__"):
+                return True, None
+            elif (
+                isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "__all__"
+            ):
+                return True, None
+
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Assign)
+                and any(
+                    RepositoryContext._target_binds_name(target, "__all__")
+                    for target in node.targets
+                )
+                and id(node) not in supported_assignments
+            ):
+                return True, None
+            if (
+                isinstance(node, ast.AnnAssign)
+                and RepositoryContext._target_binds_name(node.target, "__all__")
+                and id(node) not in supported_assignments
+            ):
+                return True, None
+            if (
+                isinstance(node, ast.AugAssign)
+                and RepositoryContext._target_binds_name(node.target, "__all__")
+            ):
+                return True, None
+            if isinstance(node, ast.Delete) and any(
+                RepositoryContext._target_binds_name(target, "__all__")
+                for target in node.targets
+            ):
+                return True, None
+            if RepositoryContext._import_binds_name(node, "__all__"):
+                return True, None
+            if (
+                isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "__all__"
+            ):
+                return True, None
+
+        if not declarations:
+            return False, frozenset()
+        if len(declarations) != 1:
+            return True, None
+        value = declarations[0]
+        if not isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+            return True, None
+        names = []
+        for element in value.elts:
+            if not isinstance(element, ast.Constant) or not isinstance(element.value, str):
+                return True, None
+            names.append(element.value)
+
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Name)
+                and node.id == "__all__"
+                and (
+                    not isinstance(node.ctx, ast.Store)
+                    or id(node) not in supported_targets
+                )
+            ):
+                return True, None
+        return True, frozenset(names)
 
     @staticmethod
     def _has_local_import_root(module_name: str, documents: list[tuple]) -> bool:

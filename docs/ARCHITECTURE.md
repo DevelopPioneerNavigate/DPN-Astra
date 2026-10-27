@@ -2,6 +2,8 @@
 
 **Creative reference:** *The Diesel Paradox* series bible, Canon V3.1, where ASTRA is an autonomous fictional intelligence whose relationship with Dr. Aaron Diesel includes genuine love, judgment, boundaries, research partnership, and dry humor. These are narrative requirements, not verifiable properties of real software.
 
+For possibly-unused-import hints, a single literal `__all__` list/tuple/set exempts only imported names it contains. Computed, mutated, conditional, or otherwise ambiguous declarations retain the conservative module-wide exclusion.
+
 For dependency diagnostics, a declared `__all__` is not proof that an explicitly requested `from module import name` attribute exists. Such checks require a statically detected symbol/re-export, matching submodule, or module-level `__getattr__`; dynamic export behavior cannot be determined.
 
 ## System topology
