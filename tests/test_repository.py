@@ -421,12 +421,24 @@ class RepositoryContextTests(unittest.TestCase):
             '__all__ = ["listed_but_missing"]\n',
             encoding="utf-8",
         )
+        (package / "attribute_assignment.py").write_text(
+            "namespace.item = 1\n",
+            encoding="utf-8",
+        )
+        (package / "bound_names.py").write_text(
+            "single = 1\n"
+            "first, second = (1, 2)\n"
+            "head, *tail = (1, 2)\n",
+            encoding="utf-8",
+        )
         (package / "consumer.py").write_text(
             "from .tasks import available\n"
             "from .tasks import missing\n"
             "from .dynamic import dynamic_name\n"
             "from .tasks import reexported as exported_name\n"
             "from .declared_exports import listed_but_missing\n"
+            "from .attribute_assignment import namespace\n"
+            "from .bound_names import single, first, second, head, tail\n"
             "from . import absent_module\n",
             encoding="utf-8",
         )
@@ -441,6 +453,11 @@ class RepositoryContextTests(unittest.TestCase):
                     "unresolved-relative",
                     "missing-local-target",
                 ),
+                (
+                    ".attribute_assignment.namespace",
+                    "unresolved-relative",
+                    "missing-local-target",
+                ),
                 (".absent_module", "unresolved-relative", "missing-local-target"),
             ],
             [
@@ -450,7 +467,7 @@ class RepositoryContextTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            3,
+            8,
             report["summary"]["local"],
         )
 

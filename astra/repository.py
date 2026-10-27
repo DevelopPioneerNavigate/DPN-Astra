@@ -1024,6 +1024,15 @@ class RepositoryContext:
         except (SyntaxError, RecursionError, ValueError):
             return None
 
+        def target_binds_name(target: ast.AST) -> bool:
+            if isinstance(target, ast.Name):
+                return target.id == name
+            if isinstance(target, ast.Starred):
+                return target_binds_name(target.value)
+            if isinstance(target, (ast.Tuple, ast.List)):
+                return any(target_binds_name(element) for element in target.elts)
+            return False
+
         for node in tree.body:
             if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
                 if node.name == name:
@@ -1031,12 +1040,8 @@ class RepositoryContext:
                     return {"line": node.lineno, "kind": kind}
             elif isinstance(node, (ast.Assign, ast.AnnAssign)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                for target in targets:
-                    if any(
-                        isinstance(child, ast.Name) and child.id == name
-                        for child in ast.walk(target)
-                    ):
-                        return {"line": node.lineno, "kind": "variable"}
+                if any(target_binds_name(target) for target in targets):
+                    return {"line": node.lineno, "kind": "variable"}
         return None
 
     def _read_documents(self):
