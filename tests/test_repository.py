@@ -532,6 +532,11 @@ class RepositoryContextTests(unittest.TestCase):
             "    optional_package = None\n"
             "if optional_package:\n"
             "    print(optional_package)\n"
+            "try:\n"
+            "    def deferred_import():\n"
+            "        import project_plugin.deferred\n"
+            "except ImportError:\n"
+            "    deferred_import = None\n"
             "import project_plugin.absent\n",
             encoding="utf-8",
         )
@@ -551,9 +556,18 @@ class RepositoryContextTests(unittest.TestCase):
         self.assertTrue(imports_by_name["optional_package"]["optional"])
         self.assertIsNone(imports_by_name["optional_package"]["issue"])
         self.assertFalse(imports_by_name["project_plugin.absent"]["optional"])
+        self.assertFalse(imports_by_name["project_plugin.deferred"]["optional"])
+        self.assertEqual(
+            "missing-local-target",
+            imports_by_name["project_plugin.deferred"]["issue"],
+        )
         self.assertEqual(2, report["summary"]["optional_imports"])
         self.assertEqual(
-            ["project_plugin.missing", "project_plugin.absent"],
+            [
+                "project_plugin.missing",
+                "project_plugin.deferred",
+                "project_plugin.absent",
+            ],
             [issue["imported_name"] for issue in report["issues"]],
         )
 

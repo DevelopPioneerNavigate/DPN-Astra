@@ -593,7 +593,20 @@ class RepositoryContext:
                 )
                 scopes.append(node.name)
                 scope_kinds.append("class" if kind == "class" else "function")
-                self.generic_visit(node)
+                if kind == "class":
+                    self.generic_visit(node)
+                else:
+                    for field_name in ("decorator_list", "args", "returns", "type_params"):
+                        field_value = getattr(node, field_name, None)
+                        if isinstance(field_value, list):
+                            for child in field_value:
+                                self.visit(child)
+                        elif isinstance(field_value, ast.AST):
+                            self.visit(field_value)
+                    optional_import_stack.append(False)
+                    for statement in node.body:
+                        self.visit(statement)
+                    optional_import_stack.pop()
                 scopes.pop()
                 scope_kinds.pop()
 
