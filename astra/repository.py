@@ -399,7 +399,6 @@ class RepositoryContext:
 
         declarations = []
         supported_targets = set()
-        supported_assignments = set()
         for node in tree.body:
             if isinstance(node, ast.Assign) and any(
                 RepositoryContext._target_binds_name(target, "__all__")
@@ -413,7 +412,6 @@ class RepositoryContext:
                     return True, None
                 declarations.append(node.value)
                 supported_targets.add(id(node.targets[0]))
-                supported_assignments.add(id(node))
             elif (
                 isinstance(node, ast.AnnAssign)
                 and isinstance(node.target, ast.Name)
@@ -423,56 +421,28 @@ class RepositoryContext:
                     return True, None
                 declarations.append(node.value)
                 supported_targets.add(id(node.target))
-                supported_assignments.add(id(node))
-            elif (
-                isinstance(node, ast.AugAssign)
-                and RepositoryContext._target_binds_name(node.target, "__all__")
-            ):
-                return True, None
-            elif isinstance(node, ast.Delete) and any(
-                RepositoryContext._target_binds_name(target, "__all__")
-                for target in node.targets
-            ):
-                return True, None
-            elif RepositoryContext._import_binds_name(node, "__all__"):
-                return True, None
-            elif (
-                isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-                and node.name == "__all__"
-            ):
-                return True, None
 
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Assign)
-                and any(
-                    RepositoryContext._target_binds_name(target, "__all__")
-                    for target in node.targets
-                )
-                and id(node) not in supported_assignments
-            ):
-                return True, None
-            if (
-                isinstance(node, ast.AnnAssign)
-                and RepositoryContext._target_binds_name(node.target, "__all__")
-                and id(node) not in supported_assignments
-            ):
-                return True, None
-            if (
-                isinstance(node, ast.AugAssign)
-                and RepositoryContext._target_binds_name(node.target, "__all__")
-            ):
-                return True, None
-            if isinstance(node, ast.Delete) and any(
-                RepositoryContext._target_binds_name(target, "__all__")
-                for target in node.targets
-            ):
-                return True, None
             if RepositoryContext._import_binds_name(node, "__all__"):
                 return True, None
             if (
                 isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
                 and node.name == "__all__"
+            ):
+                return True, None
+            if isinstance(node, ast.ExceptHandler) and node.name == "__all__":
+                return True, None
+            if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name == "__all__":
+                return True, None
+            if isinstance(node, ast.MatchMapping) and node.rest == "__all__":
+                return True, None
+            if (
+                isinstance(node, ast.Name)
+                and node.id == "__all__"
+                and (
+                    not isinstance(node.ctx, ast.Store)
+                    or id(node) not in supported_targets
+                )
             ):
                 return True, None
 
@@ -488,17 +458,6 @@ class RepositoryContext:
             if not isinstance(element, ast.Constant) or not isinstance(element.value, str):
                 return True, None
             names.append(element.value)
-
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Name)
-                and node.id == "__all__"
-                and (
-                    not isinstance(node.ctx, ast.Store)
-                    or id(node) not in supported_targets
-                )
-            ):
-                return True, None
         return True, frozenset(names)
 
     @staticmethod

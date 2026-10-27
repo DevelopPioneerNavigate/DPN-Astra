@@ -672,7 +672,13 @@ class RepositoryContextTests(unittest.TestCase):
             "accidental = 2\n"
             "dynamic_name = 3\n"
             "mutated_name = 4\n"
-            "conditional_name = 5\n",
+            "conditional_name = 5\n"
+            "loop_name = 6\n"
+            "walrus_name = 7\n"
+            "match_name = 11\n"
+            "tuple_name = 8\n"
+            "set_name = 9\n"
+            "annotated_name = 10\n",
             encoding="utf-8",
         )
         (self.root / "exports.py").write_text(
@@ -696,11 +702,49 @@ class RepositoryContextTests(unittest.TestCase):
             'if flag:\n    __all__ = ["conditional_name"]\n',
             encoding="utf-8",
         )
+        (self.root / "loop_exports.py").write_text(
+            "from helpers import loop_name\n"
+            "for __all__ in ():\n    pass\n",
+            encoding="utf-8",
+        )
+        (self.root / "walrus_exports.py").write_text(
+            "from helpers import walrus_name\n"
+            'if False:\n    (__all__ := ["walrus_name"])\n',
+            encoding="utf-8",
+        )
+        (self.root / "match_exports.py").write_text(
+            "from helpers import match_name\n"
+            "match value:\n    case __all__:\n        pass\n",
+            encoding="utf-8",
+        )
+        (self.root / "tuple_exports.py").write_text(
+            "from helpers import tuple_name as tuple_public\n"
+            "from helpers import accidental as tuple_private\n"
+            '__all__ = ("tuple_public",)\n',
+            encoding="utf-8",
+        )
+        (self.root / "set_exports.py").write_text(
+            "from helpers import set_name as set_public\n"
+            "from helpers import accidental as set_private\n"
+            '__all__ = {"set_public"}\n',
+            encoding="utf-8",
+        )
+        (self.root / "annotated_exports.py").write_text(
+            "from helpers import annotated_name as annotated_public\n"
+            "from helpers import accidental as annotated_private\n"
+            '__all__: list[str] = ["annotated_public"]\n',
+            encoding="utf-8",
+        )
 
         report = RepositoryContext(self.root).dependencies()
 
         self.assertEqual(
-            [("exports.py", "helpers.accidental", "possibly-unused-import")],
+            [
+                ("annotated_exports.py", "helpers.accidental", "possibly-unused-import"),
+                ("exports.py", "helpers.accidental", "possibly-unused-import"),
+                ("set_exports.py", "helpers.accidental", "possibly-unused-import"),
+                ("tuple_exports.py", "helpers.accidental", "possibly-unused-import"),
+            ],
             [
                 (issue["path"], issue["imported_name"], issue["issue"])
                 for issue in report["issues"]
