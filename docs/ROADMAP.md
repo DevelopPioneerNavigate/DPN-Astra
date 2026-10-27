@@ -1,5 +1,7 @@
 # ASTRA Development Roadmap
 
+Static missing-member analysis does not treat `__all__` as proof that an explicitly imported name exists; it requires a detected binding/re-export, submodule, or module-level `__getattr__`.
+
 ## v0.1 — Genesis (this PR)
 - Local model transport, status checks and honest failure handling.
 - Session conversation plus user-approved SQLite memory with deletion.

@@ -417,11 +417,16 @@ class RepositoryContextTests(unittest.TestCase):
             "def reexported():\n    return None\n",
             encoding="utf-8",
         )
+        (package / "declared_exports.py").write_text(
+            '__all__ = ["listed_but_missing"]\n',
+            encoding="utf-8",
+        )
         (package / "consumer.py").write_text(
             "from .tasks import available\n"
             "from .tasks import missing\n"
             "from .dynamic import dynamic_name\n"
             "from .tasks import reexported as exported_name\n"
+            "from .declared_exports import listed_but_missing\n"
             "from . import absent_module\n",
             encoding="utf-8",
         )
@@ -431,6 +436,11 @@ class RepositoryContextTests(unittest.TestCase):
         self.assertEqual(
             [
                 (".tasks.missing", "unresolved-relative", "missing-local-target"),
+                (
+                    ".declared_exports.listed_but_missing",
+                    "unresolved-relative",
+                    "missing-local-target",
+                ),
                 (".absent_module", "unresolved-relative", "missing-local-target"),
             ],
             [

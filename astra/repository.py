@@ -958,13 +958,6 @@ class RepositoryContext:
         for node in tree.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "__getattr__":
                 return True
-            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                if any(
-                    isinstance(target, ast.Name) and target.id == "__all__"
-                    for target in targets
-                ):
-                    return True
             if isinstance(node, ast.ImportFrom):
                 if any(
                     (alias.asname or alias.name) == name
