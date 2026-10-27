@@ -955,21 +955,25 @@ class RepositoryContext:
         except (SyntaxError, RecursionError, ValueError):
             return True
 
-        for node in tree.body:
+        for node in reversed(tree.body):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "__getattr__":
                 return True
-            if isinstance(node, ast.ImportFrom):
-                if any(
-                    (alias.asname or alias.name) == name
-                    for alias in node.names
-                ):
-                    return True
-            if isinstance(node, ast.Import):
-                if any(
-                    (alias.asname or alias.name.split(".", 1)[0]) == name
-                    for alias in node.names
-                ):
-                    return True
+            if isinstance(node, ast.Delete) and any(
+                RepositoryContext._target_binds_name(target, "__getattr__")
+                for target in node.targets
+            ):
+                break
+            if RepositoryContext._import_binds_name(node, "__getattr__"):
+                return True
+
+        for node in reversed(tree.body):
+            if isinstance(node, ast.Delete) and any(
+                RepositoryContext._target_binds_name(target, name)
+                for target in node.targets
+            ):
+                return False
+            if RepositoryContext._import_binds_name(node, name):
+                return True
         return False
 
     @staticmethod
@@ -1024,25 +1028,50 @@ class RepositoryContext:
         except (SyntaxError, RecursionError, ValueError):
             return None
 
-        def target_binds_name(target: ast.AST) -> bool:
-            if isinstance(target, ast.Name):
-                return target.id == name
-            if isinstance(target, ast.Starred):
-                return target_binds_name(target.value)
-            if isinstance(target, (ast.Tuple, ast.List)):
-                return any(target_binds_name(element) for element in target.elts)
-            return False
-
-        for node in tree.body:
+        for node in reversed(tree.body):
+            if isinstance(node, ast.Delete) and any(
+                RepositoryContext._target_binds_name(target, name)
+                for target in node.targets
+            ):
+                return None
+            if RepositoryContext._import_binds_name(node, name):
+                return None
             if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
                 if node.name == name:
                     kind = "class" if isinstance(node, ast.ClassDef) else "function"
                     return {"line": node.lineno, "kind": kind}
-            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                if any(target_binds_name(target) for target in targets):
+                if any(
+                    RepositoryContext._target_binds_name(target, name)
+                    for target in targets
+                ):
                     return {"line": node.lineno, "kind": "variable"}
         return None
+
+    @staticmethod
+    def _target_binds_name(target: ast.AST, name: str) -> bool:
+        pending = [target]
+        while pending:
+            current = pending.pop()
+            if isinstance(current, ast.Name) and current.id == name:
+                return True
+            if isinstance(current, ast.Starred):
+                pending.append(current.value)
+            elif isinstance(current, (ast.Tuple, ast.List)):
+                pending.extend(current.elts)
+        return False
+
+    @staticmethod
+    def _import_binds_name(node: ast.AST, name: str) -> bool:
+        if isinstance(node, ast.ImportFrom):
+            return any((alias.asname or alias.name) == name for alias in node.names)
+        if isinstance(node, ast.Import):
+            return any(
+                (alias.asname or alias.name.split(".", 1)[0]) == name
+                for alias in node.names
+            )
+        return False
 
     def _read_documents(self):
         documents = []

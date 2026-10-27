@@ -431,6 +431,25 @@ class RepositoryContextTests(unittest.TestCase):
             "head, *tail = (1, 2)\n",
             encoding="utf-8",
         )
+        (package / "deleted.py").write_text(
+            "def removed():\n    return None\n"
+            "del removed\n"
+            "value = 1\n"
+            "del value\n"
+            "value = 2\n",
+            encoding="utf-8",
+        )
+        (package / "deleted_reexport.py").write_text(
+            "from helpers import reexported\n"
+            "del reexported\n",
+            encoding="utf-8",
+        )
+        (package / "dynamic_deleted.py").write_text(
+            "def __getattr__(name):\n    return None\n"
+            "value = 1\n"
+            "del value\n",
+            encoding="utf-8",
+        )
         (package / "consumer.py").write_text(
             "from .tasks import available\n"
             "from .tasks import missing\n"
@@ -439,6 +458,9 @@ class RepositoryContextTests(unittest.TestCase):
             "from .declared_exports import listed_but_missing\n"
             "from .attribute_assignment import namespace\n"
             "from .bound_names import single, first, second, head, tail\n"
+            "from .deleted import removed, value\n"
+            "from .deleted_reexport import reexported\n"
+            "from .dynamic_deleted import value as dynamic_value\n"
             "from . import absent_module\n",
             encoding="utf-8",
         )
@@ -458,6 +480,16 @@ class RepositoryContextTests(unittest.TestCase):
                     "unresolved-relative",
                     "missing-local-target",
                 ),
+                (
+                    ".deleted.removed",
+                    "unresolved-relative",
+                    "missing-local-target",
+                ),
+                (
+                    ".deleted_reexport.reexported",
+                    "unresolved-relative",
+                    "missing-local-target",
+                ),
                 (".absent_module", "unresolved-relative", "missing-local-target"),
             ],
             [
@@ -467,7 +499,7 @@ class RepositoryContextTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            8,
+            10,
             report["summary"]["local"],
         )
 
