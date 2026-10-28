@@ -200,6 +200,37 @@ For possibly-unused-import hints, a single literal `__all__` list, tuple, or set
 
 If a model is missing or Ollama is stopped, ASTRA reports the real error; it never fabricates a model response.
 
+### Local model-assisted code drafts
+
+With `ASTRA_PROJECT_DIR` enabled, enter an existing eligible relative file path in
+the Project Inspector, describe one concrete change, and click **Generate reviewed
+draft**. Confirm that the file may be sent to your configured local inference
+provider. The selected **on-disk** file is sent verbatim, alongside bounded
+repository evidence matched to the instruction; unsaved editor text is not input
+and is replaced only on a successful draft. Review source for secrets first:
+target content is deliberately not redacted because it must be faithfully edited.
+Other repository excerpts retain the existing best-effort filters/redaction.
+
+The provider must return a JSON object with exactly one `content` string containing
+the complete replacement. ASTRA rejects malformed, fenced, duplicate-key,
+oversized, non-text, and invalid-Unicode output. Files/replacements remain limited
+to 24 KiB of UTF-8. Python/JSON/TOML drafts must pass existing static syntax checks;
+other eligible text types explicitly have no validator. Syntax success does not
+establish correctness or test success.
+
+A successful request fills the editor and stages a complete diff. **No file is
+written until you separately confirm Apply.** Existing guarded rollback remains
+available. A SHA-256 baseline check rejects a file changed while the model was
+generating; the normal Apply check also rejects intervening edits after staging.
+One drafting request may run at a time per HTTP service; others return a conflict.
+Failures do not fall back to invented code or append conversation history.
+
+This is bounded single-file drafting, not multi-file implementation, an autonomous
+agent loop, or a test/build runner. It requires a working installed local model.
+Automated tests use explicitly controlled provider replies to verify the workflow,
+not to establish code-generation quality. Invalid model output must be retried
+explicitly. Commands, project tests and builds remain disabled.
+
 ### Local inference boundary
 
 CORE consumes the typed `InferenceProvider` contract in `astra/inference.py`: adapter identity, selected model, health, and role-tagged chat messages. The shared `ModelError` represents failed inference, not an answer. Ollama remains the only production adapter; this contract does not install models, route tasks, or add llama.cpp/vLLM support.

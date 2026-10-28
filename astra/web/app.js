@@ -625,6 +625,48 @@
     }
   });
 
+  $("project-draft").addEventListener("click", async () => {
+    const path = $("project-file-path").value.trim();
+    const instruction = $("project-draft-instruction").value.trim();
+    const status = $("project-change-status");
+    if (!path || !instruction) {
+      status.textContent = "Select an existing file and describe the requested change before drafting.";
+      return;
+    }
+    if (!confirm("Send the on-disk file " + path
+      + " verbatim plus bounded repository excerpts to local inference?\n\nReview for secrets first. Unsaved editor text will be replaced on success. No file writes or tests occur until separately authorized.")) return;
+    const controls = [...document.querySelectorAll("#project-inspector button, #project-inspector input, #project-inspector textarea")];
+    const states = controls.map(control => control.disabled);
+    controls.forEach(control => { control.disabled = true; });
+    stagedChange = null;
+    $("project-apply").hidden = true;
+    $("project-change-diff").textContent = "";
+    status.textContent = "Generating a local model draft for " + path + ". No file writes or commands...";
+    try {
+      const response = await api("/api/project/draft", {
+        method: "POST", body: JSON.stringify({ path, instruction, confirm: true })
+      });
+      $("project-file-path").value = response.proposal.path;
+      $("project-file-content").value = response.content;
+      stagedChange = response.proposal;
+      $("project-change-diff").textContent = stagedChange.diff;
+      $("project-apply").hidden = false;
+      status.textContent = "Draft from " + response.provider + " / " + response.model
+        + ". " + (response.validation ? response.validation.language + " syntax passed. " : "No syntax validator for this file type. ")
+        + "Review the entire diff. No files written; no tests executed.";
+      refreshProjectHistory();
+    } catch (error) {
+      status.textContent = "Model draft failed: " + error.message + ". No draft was applied.";
+    } finally {
+      controls.forEach((control, index) => { control.disabled = states[index]; });
+      if (stagedChange) {
+        $("project-file-content").disabled = false;
+        $("project-propose").disabled = false;
+        $("project-validate").disabled = false;
+      }
+    }
+  });
+
   $("project-validate").addEventListener("click", async () => {
     const status = $("project-validation-status");
     $("project-validate").disabled = true;

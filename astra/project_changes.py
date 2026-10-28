@@ -21,6 +21,10 @@ MAX_AUDIT_EVENTS = 100
 PROPOSAL_LIFETIME = timedelta(minutes=15)
 
 
+class ProjectDraftConflict(RuntimeError):
+    """The source changed while a model draft was being prepared."""
+
+
 @dataclass
 class Proposal:
     path: str
@@ -56,14 +60,23 @@ class ProjectChanges:
     def read_file(self, relative_path: str) -> dict:
         self.permissions.require_read()
         target, display_path = self._resolve_target(relative_path)
-        content = self._read_text(target)
-        return {"path": display_path, "content": content, "bytes": target.stat().st_size}
+        original = self._read_bytes(target)
+        try:
+            content = original.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Only UTF-8 text files can be changed") from exc
+        return {
+            "path": display_path, "content": content, "bytes": len(original),
+            "sha256": self._hash(original),
+        }
 
-    def propose(self, relative_path: str, content: str) -> dict:
+    def propose(self, relative_path: str, content: str, *, expected_sha256=None) -> dict:
         target, display_path = self._resolve_target(relative_path)
         if not isinstance(content, str):
             raise ValueError("Proposed file content must be text")
         original = self._read_bytes(target)
+        if expected_sha256 is not None and self._hash(original) != expected_sha256:
+            raise ProjectDraftConflict("Project file changed during drafting; reload and generate a new draft")
         try:
             original_text = original.decode("utf-8")
         except UnicodeDecodeError as exc:
@@ -189,12 +202,6 @@ class ProjectChanges:
         if len(data) > MAX_CHANGE_BYTES:
             raise ValueError(f"Project files larger than {MAX_CHANGE_BYTES} bytes cannot be edited")
         return data
-
-    def _read_text(self, target: Path) -> str:
-        try:
-            return self._read_bytes(target).decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError("Only UTF-8 text files can be changed") from exc
 
     @staticmethod
     def _hash(data: bytes) -> str:

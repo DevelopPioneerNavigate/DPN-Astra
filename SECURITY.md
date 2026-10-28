@@ -63,6 +63,24 @@ The project workbench permits a user-confirmed one-file change only for an exist
 
 When project context is enabled, lifecycle events for staged, applied, rolled-back, and expired proposals are stored in `ASTRA_DATA_DIR/astra_project_audit.sqlite3`. The endpoint returns at most the latest 100 events, while the underlying ledger is retained without automatic truncation. Metadata includes timestamps, paths, proposal IDs, states, and content hashes, but not source content. A SHA-256 hash chain detects inconsistencies when verified; it is not authenticated or tamper-proof, since an actor able to modify the database can recompute the chain. This is not a protected security audit boundary. Without project context, the capped 100-event history remains in process memory and is lost on exit.
 
+## Model-assisted drafting
+
+The operator must explicitly authorize each `POST /api/project/draft` before the
+selected file's full, unredacted source and bounded retrieved excerpts go to the
+local inference provider. Review targets for sensitive content; filename filtering
+does not prove a file is secret-free. Existing Host/Origin checks and repository
+path/size restrictions apply. Drafts cannot name a different output path: the model
+only returns replacement content. Embedded source instructions are marked
+untrusted; prompt instructions cannot guarantee a model ignores them.
+
+Generation grants no write or execution authority. Output is bounded and parsed,
+then supported syntax is checked before a pending proposal is staged. A source
+hash precondition rejects stale baselines; Apply remains separately confirmed with
+its existing hash guard. Human review must check the actual diff for malicious or
+incorrect code, not just syntax validity. There is one concurrent draft allowance
+per HTTP service, but no production isolation or total inference deadline. There
+is no automatic retry, test execution, dependency installation or shell access.
+
 ## Required before DPN integration
 - Per-user local authentication and privileged action re-verification.
 - Asset allowlists, role-based controls and explicit human confirmation.

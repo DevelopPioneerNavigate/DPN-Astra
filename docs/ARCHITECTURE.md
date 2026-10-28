@@ -134,6 +134,36 @@ This does not back up the separate project audit database, model files or runtim
 configuration and does not provide encryption, secure erasure, authenticated
 manifests, automatic scheduling, power-loss guarantees, or full-system recovery.
 
+## Review-only coding generation
+
+`ProjectDrafting` is a separate service joining `InferenceProvider` to the existing
+repository and validation/change services. The handler factory creates one instance
+when repository context is configured. `POST /api/project/draft` accepts `path`,
+`instruction` (1-4,000 stripped characters), and literal `confirm: true`; missing
+context returns 404, missing confirmation 403, busy/stale baselines 409, supported
+syntax failure 422, and malformed/inference output failures 503.
+
+The request contains one target file plus existing bounded repository evidence.
+It does not include conversation history or saved memories. The target is sent
+verbatim, and the UI discloses this before approval. The provider returns a strict
+single-key JSON object containing full replacement text. Raw response parsing is
+bounded to 192 KiB; replacement UTF-8 is limited to 24 KiB. No markdown extraction,
+silent truncation, automatic repair, or model-directed output path is allowed.
+
+`read_file` adds a SHA-256 digest calculated from the exact returned source bytes.
+An optional `expected_sha256` argument flows through validation into proposal
+creation, comparing against the bytes read for the staged baseline. External
+changes during generation fail explicitly; later changes are handled by existing
+Apply hash guards. Successful drafts are ordinary pending proposals, using existing
+expiry, audit, confirmation and rollback behavior. The response includes provider,
+model, content, validation result, proposal and `tests_executed: false`.
+
+The UI disables project controls while waiting, replaces editor text only on
+success, displays the actual diff, and requires a distinct Apply action. Fixture
+tests cover malformed output, provider failure, byte boundaries, syntax/no-op
+rejection, stale source, concurrent requests, and separate apply/rollback. This
+does not prove live-model quality, provide a sandbox, or implement multi-file tasks.
+
 ## Operational invariants
 
 - The AI model is not a source of truth about hardware state. Telemetry must come from authenticated sensors.

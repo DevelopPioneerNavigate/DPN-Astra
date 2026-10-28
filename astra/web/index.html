@@ -89,6 +89,10 @@
             <label class="visuallyhidden" for="project-file-content">Proposed file content</label>
             <textarea id="project-file-content" maxlength="24576" rows="10" spellcheck="false" placeholder="Load an existing UTF-8 project file to review or edit it. Changes are not written until you review the diff and confirm Apply." disabled></textarea>
             <button id="project-propose" class="ghost" type="button" disabled>Preview change</button>
+            <label for="project-draft-instruction">Requested change for local model</label>
+            <textarea id="project-draft-instruction" maxlength="4000" rows="3" placeholder="Describe one concrete change to the selected existing file. Generation stages a diff only."></textarea>
+            <button id="project-draft" class="ghost" type="button">Generate reviewed draft</button>
+            <p class="notice">Drafting sends the selected file verbatim and bounded repository excerpts to your local model. Review source for secrets first. It uses the on-disk file, not unsaved editor text. No tests or commands run.</p>
             <p id="project-change-status" class="notice" aria-live="polite">No project changes staged. Commands are never executed.</p>
             <pre id="project-change-diff" class="change-diff" aria-label="Proposed source diff"></pre>
             <div class="memoryform">

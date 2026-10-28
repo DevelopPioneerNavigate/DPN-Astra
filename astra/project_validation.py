@@ -162,14 +162,14 @@ class ProjectValidation:
             },
         }
 
-    def propose(self, relative_path: str, content: str) -> dict:
+    def propose(self, relative_path: str, content: str, *, expected_sha256=None) -> dict:
         suffix = Path(relative_path).suffix.lower() if isinstance(relative_path, str) else ""
         validation = None
         if suffix in VALIDATORS:
             validation = self.validate(relative_path, content)
             if not validation["valid"]:
                 raise ProjectSyntaxError(validation)
-        proposal = self.changes.propose(relative_path, content)
+        proposal = self.changes.propose(relative_path, content, expected_sha256=expected_sha256)
         return {"proposal": proposal, "validation": validation}
 
     @staticmethod
