@@ -166,6 +166,28 @@ def make_handler(core: AstraCore):
                     self._send(200, core.repository.changes.review_checkpoints())
                 except (OSError, sqlite3.Error):
                     self._send(503, {"error": "Project review checkpoints unavailable"})
+            elif url.path.startswith("/api/project/checkpoints/"):
+                if core.repository is None:
+                    self._send(404, {"error": "Project context is not enabled"})
+                    return
+                parts = url.path.strip("/").split("/")
+                if len(parts) != 5 or parts[4] != "inspect":
+                    self._send(404, {"error": "Not found"})
+                    return
+                try:
+                    self._send(200, {"inspection": core.repository.changes.inspect_checkpoint(parts[3])})
+                except LookupError as exc:
+                    self._send(404, {"error": str(exc)})
+                except (FileNotFoundError, NotADirectoryError):
+                    self._send(404, {"error": "Checkpoint target file was not found"})
+                except ValueError as exc:
+                    self._send(400, {"error": str(exc)})
+                except sqlite3.Error:
+                    self._send(503, {"error": "Project review checkpoints unavailable"})
+                except PermissionError as exc:
+                    self._send(403, {"error": str(exc)})
+                except OSError as exc:
+                    self._send(500, {"error": f"Checkpoint file inspection failed: {exc.strerror or str(exc)}"})
             elif url.path.startswith("/api/project/proposals/"):
                 if core.repository is None:
                     self._send(404, {"error": "Project context is not enabled"})

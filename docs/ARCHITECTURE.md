@@ -243,13 +243,34 @@ hashes were checked. Attempted staging metadata is not used to reconstruct state
 it never invokes inference or writes project files.
 
 The UI recovery control restores live diffs/actions after browser reload, labels
-validation as not rechecked, and shows historical metadata without action buttons.
+validation as not rechecked, and shows historical metadata without mutation buttons.
 It preserves the previous visible reviews on fetch failure. Restart/expiry cannot
 recover source, diffs, rollback bytes, instructions, original grouping or validation
 results. Records are plaintext and unauthenticated; event-chain verification does
 not cover the materialized checkpoint index. Audit failure after a write can leave
 recorded state behind disk state. Recovery is not a disk correctness claim, task
 scheduler, durable execution journal or authorization restoration.
+
+### Read-only checkpoint file comparison
+
+`ProjectAuditLog.checkpoint` looks up one proposal ID under the configured project
+key without limiting lookup to the latest display page. `ProjectChanges.inspect_checkpoint`
+uses that record (or a retained proposal without audit storage), validates stored
+hash shape, then reads through the normal guarded UTF-8 file service. It compares
+the current exact-byte SHA-256 with the stored original/proposed hashes and returns
+`matches_original`, `matches_proposed`, or `diverged`, `checked_at`, recorded
+event/state, all three hashes, and explicit false `tests_executed` /
+`mutation_authorized` flags. No source text is returned. Persistent inspection does
+not expire/update proposals or write checkpoint/audit rows.
+
+`GET /api/project/checkpoints/<id>/inspect` retains Host checks and returns 404 for
+absent context/record/file, 400 for invalid metadata or ineligible file, 403 for
+denied reads, 503 for checkpoint storage failure, and 500 for other OS failures.
+Both historical records and live review cards expose the same read-only action.
+An error replaces prior comparison text; no lifecycle state or uncertain mutation
+status is reconciled automatically. A byte match cannot establish who wrote the
+file, runtime correctness, or future stability. The unauthenticated metadata and
+filesystem race limitations remain unchanged.
 
 ## Operational invariants
 

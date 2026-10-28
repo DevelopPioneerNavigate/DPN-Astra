@@ -315,6 +315,21 @@ retained reviews. Metadata has no automatic retention policy, encryption or
 authentication. It is not crash-safe task execution recovery or a source backup.
 The separate memory snapshot command does not back up this audit database.
 
+Use **Inspect current file hashes** on a retained review or historical checkpoint
+to compare the current file's exact bytes against the recorded original and
+proposal hashes. Results distinguish **matches original**, **matches proposal**,
+and **diverged**, with a timestamp and current SHA-256. Line-ending differences
+count as different bytes. Missing, unreadable, binary, oversized or no-longer-
+eligible targets produce explicit errors rather than a reassuring comparison.
+
+Inspection does not send source to inference or return source contents. It does
+not modify project files, checkpoint state, or mutation approval. A match with a
+proposal is **not proof that ASTRA applied it**; another writer could produce
+identical bytes. Results are point-in-time observations against unauthenticated
+metadata, not a correctness check, permission grant, or guarantee that the file
+will remain unchanged. After restart, inspecting a checkpoint still cannot restore
+Apply/Rollback controls or lost rollback bytes.
+
 ### Local inference boundary
 
 CORE consumes the typed `InferenceProvider` contract in `astra/inference.py`: adapter identity, selected model, health, and role-tagged chat messages. The shared `ModelError` represents failed inference, not an answer. Ollama remains the only production adapter; this contract does not install models, route tasks, or add llama.cpp/vLLM support.

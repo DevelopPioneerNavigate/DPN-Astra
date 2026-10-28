@@ -170,6 +170,22 @@ class ProjectAuditLog:
         finally:
             db.close()
 
+    def checkpoint(self, proposal_id: str) -> dict:
+        db = self._connect()
+        try:
+            row = db.execute(
+                """SELECT proposal_id, sequence, timestamp, event, path, state,
+                          original_sha256, proposed_sha256
+                   FROM project_review_checkpoints
+                   WHERE project_key = ? AND proposal_id = ?""",
+                (self.project_key, proposal_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError("Project review checkpoint was not found")
+            return dict(row)
+        finally:
+            db.close()
+
     def verify(self):
         db = self._connect()
         try:

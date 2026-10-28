@@ -816,6 +816,41 @@
   let reviewSet = [];
   let reviewSetBusy = false;
 
+  function appendCheckpointInspection(container, proposalId, path) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ghost checkpoint-inspect";
+    button.textContent = "Inspect current file hashes";
+    button.setAttribute("aria-label", "Inspect current file hashes for " + path);
+    button.disabled = reviewSetBusy;
+    const status = document.createElement("p");
+    status.className = "notice";
+    status.setAttribute("role", "status");
+    button.addEventListener("click", async () => {
+      if (reviewSetBusy || button.disabled) return;
+      button.disabled = true;
+      status.textContent = "Reading current file bytes without writes or execution...";
+      try {
+        const response = await api("/api/project/checkpoints/" + encodeURIComponent(proposalId) + "/inspect");
+        const inspection = response.inspection;
+        const labels = {
+          matches_original: "Current bytes match the recorded original",
+          matches_proposed: "Current bytes match the recorded proposal",
+          diverged: "Current bytes differ from both recorded versions"
+        };
+        if (!Object.hasOwn(labels, inspection.comparison)) throw new Error("Unknown checkpoint comparison");
+        status.textContent = labels[inspection.comparison] + " at " + inspection.checked_at
+          + ". SHA-256: " + inspection.current_sha256
+          + ". Point-in-time comparison against unauthenticated metadata only; not proof of operation success or code correctness."
+          + " No tests run, file writes, restored rollback bytes or mutation approval.";
+      } catch (error) {
+        status.textContent = "File hash inspection failed: " + error.message
+          + ". No current comparison is available; no operation was retried.";
+      } finally { button.disabled = reviewSetBusy; }
+    });
+    container.append(button, status);
+  }
+
   function renderReviewSet() {
     const results = $("project-set-results");
     results.replaceChildren();
@@ -852,6 +887,7 @@
         actions.append(button);
       }
       section.append(heading, diagnostic, diff, actions);
+      appendCheckpointInspection(section, entry.proposal.id, entry.proposal.path);
       results.append(section);
     }
     if (reviewSet.length) {
@@ -872,6 +908,7 @@
     $("project-set-instruction").disabled = locked;
     $("project-set-draft").disabled = locked;
     $("project-set-recover").disabled = locked;
+    for (const button of $("project-checkpoints").querySelectorAll("button")) button.disabled = locked;
     renderReviewSet();
   }
 
@@ -988,6 +1025,7 @@
           + record.event + " (" + record.state + ") / "
           + (record.recoverable ? "review retained in current process" : "metadata only; re-inspect and create a fresh proposal")
           + " / " + record.proposal_id;
+        appendCheckpointInspection(item, record.proposal_id, record.path);
         records.append(item);
       }
       $("project-checkpoint-status").textContent = (response.durable ? "Persistent" : "Process-only")

@@ -231,6 +231,50 @@ class ProjectChanges:
                 "atomic_apply": False,
             }
 
+    def inspect_checkpoint(self, proposal_id: str) -> dict:
+        if not isinstance(proposal_id, str) or not 1 <= len(proposal_id) <= 128:
+            raise ValueError("Checkpoint ID must contain 1-128 characters")
+        with self._lock:
+            if self._audit_log is not None:
+                record = self._audit_log.checkpoint(proposal_id)
+            else:
+                self._expire_proposals()
+                proposal = self._proposals.get(proposal_id)
+                if proposal is None:
+                    raise LookupError("Project review checkpoint was not found")
+                record = {
+                    "path": proposal.path,
+                    "event": None,
+                    "state": proposal.state,
+                    "original_sha256": proposal.original_hash,
+                    "proposed_sha256": proposal.replacement_hash,
+                }
+            for key in ("original_sha256", "proposed_sha256"):
+                value = record[key]
+                if not isinstance(value, str) or len(value) != 64 or any(
+                    character not in "0123456789abcdef" for character in value
+                ):
+                    raise ValueError("Recorded checkpoint hashes are invalid")
+            file = self.read_file(record["path"])
+            comparison = "diverged"
+            if file["sha256"] == record["original_sha256"]:
+                comparison = "matches_original"
+            elif file["sha256"] == record["proposed_sha256"]:
+                comparison = "matches_proposed"
+            return {
+                "proposal_id": proposal_id,
+                "path": file["path"],
+                "recorded_event": record["event"],
+                "recorded_state": record["state"],
+                "original_sha256": record["original_sha256"],
+                "proposed_sha256": record["proposed_sha256"],
+                "current_sha256": file["sha256"],
+                "comparison": comparison,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "tests_executed": False,
+                "mutation_authorized": False,
+            }
+
     def _resolve_target(self, relative_path: str):
         if not isinstance(relative_path, str) or not relative_path or len(relative_path) > 240:
             raise ValueError("Project file path must contain 1–240 characters")

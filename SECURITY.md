@@ -125,6 +125,18 @@ an audit failure after a write can leave recorded state behind actual disk state
 Inspect files whenever outcomes are uncertain. There is no automatic reconciliation,
 retention, encrypted source recovery or crash-safe task journal.
 
+`GET /api/project/checkpoints/<id>/inspect` provides explicit, read-only
+point-in-time comparison with the current file hash. Lookup is scoped to the
+configured project, including records older than the visible 100-row page.
+Without durable audit storage it can inspect only retained process-local proposals.
+Target reads reapply read permission, root/path, symlink, eligible-name, UTF-8 and
+24-KiB limits. Tampered checkpoint paths cannot bypass those checks. The response
+contains hashes and comparison metadata, not source content. Inspection never
+changes recorded lifecycle state or authorizes Apply/Rollback. Matches do not prove
+which actor wrote the file, validate code, authenticate the stored hashes, or
+prevent a local process from changing the target immediately after observation.
+Failed inspection removes the displayed comparison in favor of an explicit error.
+
 ## Required before DPN integration
 
 - Per-user local authentication and privileged action re-verification.
