@@ -219,6 +219,13 @@ def make_handler(core: AstraCore):
                         body.get("path"), body.get("instruction"), confirmed=body.get("confirm") is True,
                     )
                     self._send(201, result)
+                elif path == "/api/project/draft-set":
+                    if drafting is None:
+                        self._send(404, {"error": "Project context is not enabled"})
+                        return
+                    self._send(201, drafting.draft_many(
+                        body.get("paths"), body.get("instruction"), confirmed=body.get("confirm") is True,
+                    ))
                 elif path == "/api/project/change-set":
                     if core.repository is None:
                         self._send(404, {"error": "Project context is not enabled"})

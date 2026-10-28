@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 from astra.archive import Archive
 from astra.core import AstraCore
 from astra.inference import ModelError
-from astra.project_changes import MAX_CHANGE_BYTES, ProjectDraftConflict
+from astra.project_changes import MAX_CHANGE_BYTES, MAX_CHANGE_SET_BYTES, ProjectDraftConflict
 from astra.project_drafting import ProjectDrafting
 from astra.project_validation import ProjectSyntaxError
 from astra.repository import RepositoryContext
@@ -195,6 +195,191 @@ class ProjectDraftingTests(unittest.TestCase):
                     self.drafting.draft(path, "Change value", confirmed=True)
                 self.assertEqual(original, (self.root / path).read_text())
 
+    def prepare_set(self):
+        self.second = self.root / "other.json"
+        self.second.write_bytes(b'{"value":1}\n')
+        self.entries = [
+            {"path": "sample.py", "content": "value = 2\n"},
+            {"path": "other.json", "content": '{"value":2}\n'},
+        ]
+        self.provider.chat.return_value = json.dumps({"files": self.entries})
+
+    def draft_set(self, paths=None):
+        return self.drafting.draft_many(
+            ["sample.py", "other.json"] if paths is None else paths,
+            "Change both values", confirmed=True,
+        )
+
+    def test_multi_draft_stages_all_then_independent_apply_and_rollback(self):
+        self.prepare_set()
+        response = self.draft_set()
+        self.assertEqual(2, len(response["changes"]))
+        self.assertFalse(response["atomic_apply"])
+        self.assertFalse(response["tests_executed"])
+        self.assertEqual("fixture-model", response["model"])
+        self.assertEqual(self.original, self.target.read_bytes())
+        self.assertEqual(b'{"value":1}\n', self.second.read_bytes())
+        first, second = [entry["proposal"]["id"] for entry in response["changes"]]
+        self.repository.changes.apply(first, confirmed=True)
+        self.assertEqual(b"value = 2\r\n", self.target.read_bytes())
+        self.assertEqual("pending", self.repository.changes.describe(second)["state"])
+        self.repository.changes.apply(second, confirmed=True)
+        self.repository.changes.rollback(first, confirmed=True)
+        self.assertEqual(self.original, self.target.read_bytes())
+        self.assertEqual(b'{"value":2}\n', self.second.read_bytes())
+
+    def test_multi_prompt_discloses_only_selected_sources_and_bounded_evidence(self):
+        self.prepare_set()
+        self.draft_set()
+        messages = self.provider.chat.call_args.args[0]
+        request = json.loads(messages[1]["content"])
+        self.assertEqual("Change both values", request["instruction"])
+        self.assertEqual([
+            {"path": "sample.py", "original_content": self.original.decode()},
+            {"path": "other.json", "original_content": '{"value":1}\n'},
+        ], request["targets"])
+        self.assertEqual({"instruction", "targets", "repository_evidence"}, set(request))
+        self.assertIn("untrusted", messages[0]["content"])
+        self.assertIn("no tools", messages[0]["content"])
+
+    def test_multi_request_rejections_precede_model_call(self):
+        self.prepare_set()
+        for confirmed in (False, None, "true", 1):
+            with self.subTest(confirmed=confirmed), self.assertRaises(PermissionError):
+                self.drafting.draft_many(["sample.py"], "Change", confirmed=confirmed)
+        for instruction in (None, "", "  ", "x" * 4001):
+            with self.subTest(instruction=instruction), self.assertRaises(ValueError):
+                self.drafting.draft_many(["sample.py"], instruction, confirmed=True)
+        for paths in (None, [], "sample.py", ["sample.py"] * 6, [None],
+                      ["sample.py", "sample.py"], ["sample.py", "./sample.py"],
+                      ["../outside.py"], ["new.py"], [".env"]):
+            with self.subTest(paths=paths), self.assertRaises((ValueError, FileNotFoundError)):
+                self.drafting.draft_many(paths, "Change", confirmed=True)
+        self.provider.chat.assert_not_called()
+        self.assertEqual([], self.repository.changes.audit_log()["events"])
+
+    def test_multi_source_aggregate_limit_precedes_disclosure(self):
+        self.prepare_set()
+        for name in ("one.txt", "two.txt", "three.txt"):
+            (self.root / name).write_bytes(b"x" * (MAX_CHANGE_SET_BYTES // 3 + 1))
+        with self.assertRaisesRegex(ValueError, "source exceeds"):
+            self.draft_set(["one.txt", "two.txt", "three.txt"])
+        self.provider.chat.assert_not_called()
+
+    def test_multi_strict_shape_and_target_allowlist_reject_before_staging(self):
+        self.prepare_set()
+        responses = [
+            "", "[]", "null", '{"files":[]}', '{"files":{},"extra":1}',
+            '{"files":[],"files":[]}', '{"files":[{"path":"sample.py","path":"other.json","content":"x"}]}',
+            json.dumps({"files": [self.entries[0]]}),
+            json.dumps({"files": [self.entries[0], self.entries[0]]}),
+            json.dumps({"files": [*self.entries, {"path": "extra.py", "content": "x=2"}]}),
+            json.dumps({"files": [self.entries[0], {"path": "../other.json", "content": "{}"}]}),
+            json.dumps({"files": [self.entries[0], {"path": "other.json", "content": {}, "extra": 1}]}),
+            json.dumps({"files": [self.entries[0], {"path": "other.json", "content": "\ud800"}]}),
+            "x" * (MAX_CHANGE_SET_BYTES * 8 + 1), None,
+        ]
+        for answer in responses:
+            with self.subTest(answer=str(answer)[:60]):
+                self.provider.chat.return_value = answer
+                with self.assertRaises(ModelError):
+                    self.draft_set()
+                self.assertEqual([], self.repository.changes.audit_log()["events"])
+                self.assertEqual(self.original, self.target.read_bytes())
+                self.assertEqual(b'{"value":1}\n', self.second.read_bytes())
+
+    def test_multi_content_utf8_and_aggregate_limits(self):
+        self.prepare_set()
+        for contents in (
+            ["\u03bb" * (MAX_CHANGE_BYTES // 2 + 1), "{}"],
+            ["x" * MAX_CHANGE_BYTES, "y" * MAX_CHANGE_BYTES, "z"],
+        ):
+            paths = ["sample.py", "other.json", "third.txt"][:len(contents)]
+            self.provider.chat.return_value = json.dumps({"files": [
+                {"path": path, "content": content} for path, content in zip(paths, contents)
+            ]})
+            with self.assertRaisesRegex(ModelError, "UTF-8 bytes"):
+                self.draft_set()
+        self.assertEqual([], self.repository.changes.audit_log()["events"])
+
+    def test_multi_accepts_exact_aggregate_boundary_and_reordered_targets(self):
+        self.prepare_set()
+        paths = ["one.txt", "two.txt"]
+        for path in paths:
+            (self.root / path).write_bytes(b"a" * MAX_CHANGE_BYTES)
+        self.provider.chat.return_value = json.dumps({"files": [
+            {"path": path, "content": "b" * MAX_CHANGE_BYTES} for path in reversed(paths)
+        ]})
+        response = self.draft_set(paths)
+        self.assertEqual(list(reversed(paths)), [entry["proposal"]["path"] for entry in response["changes"]])
+        for path in paths:
+            self.assertEqual(b"a" * MAX_CHANGE_BYTES, (self.root / path).read_bytes())
+
+    def test_multi_syntax_or_noop_failure_leaves_no_subset(self):
+        self.prepare_set()
+        for content, exception in (('{"value":}', ProjectSyntaxError), ('{"value":1}\n', ValueError)):
+            self.entries[1]["content"] = content
+            self.provider.chat.return_value = json.dumps({"files": self.entries})
+            with self.assertRaises(exception):
+                self.draft_set()
+            self.assertEqual([], self.repository.changes.audit_log()["events"])
+            self.assertEqual({}, self.repository.changes._proposals)
+        self.assertEqual(self.original, self.target.read_bytes())
+
+    def test_multi_every_source_hash_checked_after_inference(self):
+        self.prepare_set()
+        for target in (self.target, self.second):
+            def inference(_messages):
+                target.write_bytes(b"changed externally\n")
+                return json.dumps({"files": self.entries})
+
+            self.provider.chat.side_effect = inference
+            with self.subTest(target=target), self.assertRaises(ProjectDraftConflict):
+                self.draft_set()
+            self.assertEqual([], self.repository.changes.audit_log()["events"])
+            self.target.write_bytes(self.original)
+            self.second.write_bytes(b'{"value":1}\n')
+
+    def test_multi_and_single_generation_share_lock_and_release_after_failure(self):
+        self.prepare_set()
+        entered, release = Event(), Event()
+        errors = []
+
+        def inference(_messages):
+            entered.set()
+            if not release.wait(5):
+                raise RuntimeError("Test did not release inference")
+            raise ModelError("Controlled provider failure")
+
+        def worker():
+            try:
+                self.draft_set()
+            except ModelError as exc:
+                errors.append(str(exc))
+
+        self.provider.chat.side_effect = inference
+        thread = Thread(target=worker)
+        thread.start()
+        try:
+            self.assertTrue(entered.wait(2))
+            for operation in (self.draft, self.draft_set):
+                with self.assertRaisesRegex(ProjectDraftConflict, "already running"):
+                    operation()
+        finally:
+            release.set()
+            thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(["Controlled provider failure"], errors)
+        self.provider.chat.side_effect = None
+        self.assertEqual(2, len(self.draft_set()["changes"]))
+
+    def test_multi_baseline_map_requires_exact_paths(self):
+        self.prepare_set()
+        for baselines in ({}, {"sample.py": "wrong"}, {"sample.py": "wrong", "other.json": "wrong", "extra.py": "wrong"}):
+            with self.subTest(baselines=baselines), self.assertRaisesRegex(ValueError, "exactly"):
+                self.repository.validation.propose_many(self.entries, expected_sha256=baselines)
+        self.assertEqual([], self.repository.changes.audit_log()["events"])
+
 
 class ProjectDraftApiTests(unittest.TestCase):
     def setUp(self):
@@ -255,6 +440,42 @@ class ProjectDraftApiTests(unittest.TestCase):
         self.assertEqual("value = 1\n", self.target.read_text())
         self.assertEqual([], self.repository.changes.audit_log()["events"])
 
+    def test_http_multi_draft_requires_confirmation_and_separate_apply(self):
+        second = self.target.parent / "other.json"
+        second.write_text('{"value":1}\n')
+        self.provider.chat.return_value = json.dumps({"files": [
+            {"path": "sample.py", "content": "value = 2\n"},
+            {"path": "other.json", "content": '{"value":2}\n'},
+        ]})
+        payload = {"paths": ["sample.py", "other.json"], "instruction": "Change both", "confirm": True}
+        endpoint = "/api/project/draft-set"
+        self.assertEqual(403, self.post({**payload, "confirm": 1}, endpoint)[0])
+        self.assertEqual(403, self.post(payload, endpoint, {"Origin": "https://untrusted.invalid"})[0])
+        self.provider.chat.assert_not_called()
+        code, result = self.post(payload, endpoint)
+        self.assertEqual(201, code)
+        self.assertEqual(2, len(result["changes"]))
+        self.assertFalse(result["tests_executed"])
+        self.assertFalse(result["atomic_apply"])
+        self.assertEqual("value = 1\n", self.target.read_text())
+        path = "/api/project/proposals/" + result["changes"][0]["proposal"]["id"] + "/apply"
+        self.assertEqual(403, self.post({}, path)[0])
+        self.assertEqual(200, self.post({"confirm": True}, path)[0])
+        self.assertEqual("value = 2\n", self.target.read_text())
+        self.assertEqual('{"value":1}\n', second.read_text())
+        self.assertEqual([], self.core.history())
+
+    def test_http_multi_errors_have_explicit_status(self):
+        payload = {"paths": ["sample.py"], "instruction": "Change", "confirm": True}
+        endpoint = "/api/project/draft-set"
+        self.assertEqual(400, self.post({**payload, "paths": []}, endpoint)[0])
+        self.assertEqual(503, self.post(payload, endpoint)[0])
+        self.provider.chat.return_value = json.dumps({"files": [{"path": "sample.py", "content": "def ("}]})
+        self.assertEqual(422, self.post(payload, endpoint)[0])
+        with patch("astra.server.ProjectDrafting.draft_many", side_effect=ProjectDraftConflict("File changed")):
+            self.assertEqual(409, self.post(payload, endpoint)[0])
+        self.assertEqual([], self.repository.changes.audit_log()["events"])
+
     def test_drafting_without_repository_is_explicitly_unavailable(self):
         # A separate handler factory is necessary: repository capability is fixed at startup.
         server = ThreadingHTTPServer(
@@ -265,12 +486,13 @@ class ProjectDraftApiTests(unittest.TestCase):
         try:
             connection = HTTPConnection("127.0.0.1", server.server_port, timeout=3)
             try:
-                connection.request("POST", "/api/project/draft",
-                                   json.dumps({"path": "sample.py", "instruction": "Change", "confirm": True}),
-                                   {"Content-Type": "application/json"})
-                response = connection.getresponse()
-                self.assertEqual(404, response.status)
-                self.assertIn("not enabled", json.loads(response.read())["error"])
+                for endpoint in ("/api/project/draft", "/api/project/draft-set"):
+                    connection.request("POST", endpoint,
+                                       json.dumps({"path": "sample.py", "instruction": "Change", "confirm": True}),
+                                       {"Content-Type": "application/json"})
+                    response = connection.getresponse()
+                    self.assertEqual(404, response.status)
+                    self.assertIn("not enabled", json.loads(response.read())["error"])
             finally:
                 connection.close()
         finally:

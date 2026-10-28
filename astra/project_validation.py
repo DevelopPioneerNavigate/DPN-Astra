@@ -172,7 +172,7 @@ class ProjectValidation:
         proposal = self.changes.propose(relative_path, content, expected_sha256=expected_sha256)
         return {"proposal": proposal, "validation": validation}
 
-    def propose_many(self, entries) -> dict:
+    def propose_many(self, entries, *, expected_sha256: dict[str, str] | None = None) -> dict:
         self.changes.validate_change_set(entries)
         validations = []
         for entry in entries:
@@ -181,7 +181,7 @@ class ProjectValidation:
             if result is not None and not result["valid"]:
                 raise ProjectSyntaxError(result)
             validations.append(result)
-        proposals = self.changes.propose_many(entries)
+        proposals = self.changes.propose_many(entries, expected_sha256=expected_sha256)
         return {
             "changes": [
                 {"proposal": proposal, "validation": validation}

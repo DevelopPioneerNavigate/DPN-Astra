@@ -93,9 +93,17 @@ class ProjectChanges:
         if size > MAX_CHANGE_SET_BYTES:
             raise ValueError(f"Change-set contents exceed {MAX_CHANGE_SET_BYTES} UTF-8 bytes")
 
-    def propose_many(self, entries) -> list[dict]:
+    def propose_many(self, entries, *, expected_sha256: dict[str, str] | None = None) -> list[dict]:
         self.validate_change_set(entries)
-        proposals = [self._prepare(entry["path"], entry["content"]) for entry in entries]
+        if expected_sha256 is not None and set(expected_sha256) != {entry["path"] for entry in entries}:
+            raise ValueError("Change-set baselines must cover exactly the proposed paths")
+        proposals = [
+            self._prepare(
+                entry["path"], entry["content"],
+                expected_sha256=expected_sha256[entry["path"]] if expected_sha256 is not None else None,
+            )
+            for entry in entries
+        ]
         if len({proposal.target for proposal in proposals}) != len(proposals):
             raise ValueError("A change set cannot contain duplicate target files")
         return self._stage(proposals)

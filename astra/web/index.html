@@ -107,6 +107,12 @@
             <ul id="project-change-history" class="memorylist" aria-live="polite"></ul>
             <section class="change-set">
               <h3>Multi-file review set</h3>
+              <label for="project-set-paths">Local-model targets (one existing relative path per line)</label>
+              <textarea id="project-set-paths" maxlength="1300" rows="3" spellcheck="false" placeholder="src/core.py&#10;tests/test_core.py"></textarea>
+              <label for="project-set-instruction">Coordinated change for local model</label>
+              <textarea id="project-set-instruction" maxlength="4000" rows="3" placeholder="Describe the change across all selected files. Every target must receive a changed, complete replacement."></textarea>
+              <button id="project-set-draft" class="ghost" type="button">Generate multi-file draft</button>
+              <p class="notice">Requires approval to send every selected on-disk file verbatim plus bounded repository evidence to local inference. Review for secrets first. Maximum 48 KiB source total. Drafting only stages diffs; it never applies changes or runs tests.</p>
               <p class="notice">Submit 1-5 existing files as a JSON array of {"path":"sample.py","content":"complete replacement"}. Maximum 48 KiB total UTF-8 content; each file stays within 24 KiB. Preview never writes files. Each Apply is independent: a partially applied set is not atomic.</p>
               <label for="project-set-input">Replacement files (JSON array)</label>
               <textarea id="project-set-input" maxlength="60000" rows="8" spellcheck="false" placeholder='[{"path":"src/core.py","content":"complete replacement\n"},{"path":"tests/test_core.py","content":"complete replacement\n"}]'></textarea>

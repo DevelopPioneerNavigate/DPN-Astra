@@ -65,12 +65,13 @@ When project context is enabled, lifecycle events for staged, applied, rolled-ba
 
 ## Model-assisted drafting
 
-The operator must explicitly authorize each `POST /api/project/draft` before the
-selected file's full, unredacted source and bounded retrieved excerpts go to the
+The operator must explicitly authorize each `POST /api/project/draft` or
+`POST /api/project/draft-set` before the selected files' full, unredacted source and bounded retrieved excerpts go to the
 local inference provider. Review targets for sensitive content; filename filtering
 does not prove a file is secret-free. Existing Host/Origin checks and repository
 path/size restrictions apply. Drafts cannot name a different output path: the model
-only returns replacement content. Embedded source instructions are marked
+only returns replacement content in single-file mode. Multi-file output must
+cover exactly the operator-selected paths, with no extras or duplicates. Embedded source instructions are marked
 untrusted; prompt instructions cannot guarantee a model ignores them.
 
 Generation grants no write or execution authority. Output is bounded and parsed,
@@ -80,6 +81,14 @@ its existing hash guard. Human review must check the actual diff for malicious o
 incorrect code, not just syntax validity. There is one concurrent draft allowance
 per HTTP service, but no production isolation or total inference deadline. There
 is no automatic retry, test execution, dependency installation or shell access.
+
+Multi-file drafting is restricted to 1-5 eligible existing targets with 48 KiB
+aggregate source and replacement content, and 24 KiB per file. Raw JSON response
+parsing is capped at 384 KiB. Every target's pre-inference source hash is checked
+when preparing the set; all existing staging guards still apply. The model cannot
+choose additional files, create/delete files, or bypass a rejected entry. All
+selected files must change; unchanged entries reject the set rather than silently
+weakening scope validation. Single- and multi-file generation share the same lock.
 
 ## Multi-file review sets
 

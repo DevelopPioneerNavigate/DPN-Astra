@@ -864,6 +864,9 @@
     $("project-set-input").disabled = locked;
     $("project-set-preview").disabled = locked;
     $("project-set-refresh").disabled = locked;
+    $("project-set-paths").disabled = locked;
+    $("project-set-instruction").disabled = locked;
+    $("project-set-draft").disabled = locked;
     renderReviewSet();
   }
 
@@ -891,6 +894,7 @@
     if (reviewSetBusy) return;
     if (reviewSet.length && !confirm("Replace the visible review set? Existing proposals remain until expiry; applied changes are NOT undone. Keep any rollback IDs you need.")) return;
     lockReviewSet(true);
+    let failure = "";
     try {
       let files;
       try { files = JSON.parse($("project-set-input").value); }
@@ -902,15 +906,46 @@
       renderReviewSet();
       refreshProjectHistory();
     } catch (error) {
-      $("project-set-status").textContent = "Review-set preview failed: " + error.message
+      failure = "Review-set preview failed: " + error.message
         + ". No file writes were requested. The previous visible set is retained.";
     } finally {
-      reviewSetBusy = false;
-      $("project-set-input").disabled = false;
-      $("project-set-preview").disabled = false;
-      $("project-set-refresh").disabled = false;
-      // Re-enable existing cards without hiding preview failures in the summary.
-      for (const button of $("project-set-results").querySelectorAll("button")) button.disabled = false;
+      lockReviewSet(false);
+      if (failure) $("project-set-status").textContent = failure;
+    }
+  });
+
+  $("project-set-draft").addEventListener("click", async () => {
+    if (reviewSetBusy) return;
+    const paths = $("project-set-paths").value.split(/\r?\n/).map(path => path.trim()).filter(Boolean);
+    const instruction = $("project-set-instruction").value.trim();
+    if (!paths.length || paths.length > 5 || !instruction) {
+      $("project-set-status").textContent = "Select 1-5 existing files and describe a coordinated change.";
+      return;
+    }
+    if (reviewSet.length && !confirm("Replace the visible review set on success? Existing proposals remain until expiry; applied changes are NOT undone. Keep any rollback IDs you need.")) return;
+    if (!confirm("Send these on-disk files verbatim plus bounded repository evidence to local inference?\n\n"
+      + paths.join("\n") + "\n\nReview for secrets first. Unsaved editor text is not used. Generation only stages diffs; no writes or tests run.")) return;
+    const controls = [...document.querySelectorAll("#project-inspector button, #project-inspector input, #project-inspector textarea")];
+    const states = controls.map(control => control.disabled);
+    lockReviewSet(true);
+    controls.forEach(control => { control.disabled = true; });
+    $("project-set-status").textContent = "Generating coordinated local-model drafts. No writes or commands...";
+    let outcome = "";
+    try {
+      const response = await api("/api/project/draft-set", {
+        method: "POST", body: JSON.stringify({ paths, instruction, confirm: true })
+      });
+      reviewSet = response.changes.map(entry => ({ ...entry, uncertain: false, error: "" }));
+      outcome = " Drafted by " + response.provider + " / " + response.model
+        + ". Review every diff; no files written and no tests executed.";
+      refreshProjectHistory();
+    } catch (error) {
+      outcome = "Multi-file model draft failed: " + error.message
+        + ". No draft was applied. The previous visible set is retained.";
+    } finally {
+      controls.forEach((control, index) => { control.disabled = states[index]; });
+      lockReviewSet(false);
+      $("project-set-status").textContent += " " + outcome;
     }
   });
 

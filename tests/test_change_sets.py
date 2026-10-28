@@ -120,8 +120,8 @@ class ChangeSetTests(unittest.TestCase):
     def test_source_change_after_preparation_is_rejected_before_registration(self):
         prepare = self.changes._prepare
 
-        def prepare_and_modify(path, content):
-            proposal = prepare(path, content)
+        def prepare_and_modify(path, content, *, expected_sha256=None):
+            proposal = prepare(path, content, expected_sha256=expected_sha256)
             if path == "b.json":
                 (self.root / "a.py").write_text("value = 99\n")
             return proposal

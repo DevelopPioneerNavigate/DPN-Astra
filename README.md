@@ -225,8 +225,9 @@ generating; the normal Apply check also rejects intervening edits after staging.
 One drafting request may run at a time per HTTP service; others return a conflict.
 Failures do not fall back to invented code or append conversation history.
 
-This is bounded single-file drafting, not multi-file implementation, an autonomous
-agent loop, or a test/build runner. It requires a working installed local model.
+This single-file control remains available alongside the multi-file drafting
+workflow below. Neither is an autonomous agent loop or a test/build runner.
+Drafting requires a working installed local model.
 Automated tests use explicitly controlled provider replies to verify the workflow,
 not to establish code-generation quality. Invalid model output must be retried
 explicitly. Commands, project tests and builds remain disabled.
@@ -243,13 +244,33 @@ The Project Inspector's **Multi-file review set** accepts a JSON array containin
 ]
 ```
 
-These are **operator-supplied replacements**, not multi-file model generation.
+The JSON-array preview accepts **operator-supplied replacements**.
 ASTRA checks the entire request's shape and bounds, validates supported syntax,
 prepares every diff, rejects duplicate targets and changed baselines, then registers
 the proposals together. A failed preview leaves no actionable subset staged and
 never writes project files. Total supplied content is limited to 48 KiB UTF-8;
 individual files/replacements retain the 24-KiB limit. The HTTP request—including
 JSON escape overhead—must also fit the existing 64-KiB body limit.
+
+Alternatively, enter 1-5 existing relative paths (one per line), describe the
+coordinated change, and choose **Generate multi-file draft**. Approve sending all
+selected on-disk files verbatim and bounded repository evidence to local inference.
+Unsaved editor contents and saved memories are not supplied. Source is limited
+to 24 KiB per file and 48 KiB total; review every target for secrets first.
+
+The model must return exactly `{"files":[{"path":"...","content":"..."}]}` with
+every selected target exactly once, no extra paths/keys, and complete changed
+contents. Response JSON is capped at 384 KiB, replacement content at 48 KiB total
+and 24 KiB per file. A missing target, unchanged file, invalid supported syntax,
+stale source baseline or other invalid entry rejects the whole draft set before
+proposals become actionable. Select only files that need changes. Single- and
+multi-file generation share one concurrency allowance. There is no automatic
+retry or repair. A failed request retains the previous visible review set.
+
+Success displays ordinary per-file diffs and provider/model identity.
+**Generation writes no project files:** review and separately confirm each Apply.
+No tests or builds execute, and application remains non-atomic across files.
+Controlled provider/browser fixtures verify this pipeline, not live model quality.
 
 Each card has its own confirmed **Apply this file** and **Rollback this file**
 action. **Apply is not atomic across the set.** If the second file conflicts or

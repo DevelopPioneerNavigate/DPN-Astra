@@ -162,7 +162,39 @@ The UI disables project controls while waiting, replaces editor text only on
 success, displays the actual diff, and requires a distinct Apply action. Fixture
 tests cover malformed output, provider failure, byte boundaries, syntax/no-op
 rejection, stale source, concurrent requests, and separate apply/rollback. This
-does not prove live-model quality, provide a sandbox, or implement multi-file tasks.
+does not prove live-model quality or provide a sandbox.
+
+### Coordinated local-model draft sets
+
+`POST /api/project/draft-set` accepts `paths` (1-5 existing eligible relative
+paths), `instruction`, and literal `confirm: true`. It uses the same service,
+concurrency lock, inference interface and error statuses as single-file drafting.
+Selected source bytes are bounded to 24 KiB each / 48 KiB total before calling the
+provider. The prompt contains the exact on-disk source for every selected target
+plus bounded retrieved repository evidence, with no conversation or memory input.
+
+Strict output is `{"files":[{"path":"...","content":"..."}]}`. Duplicate JSON keys,
+extra/missing targets or keys, non-text values, invalid Unicode, and oversized
+output fail explicitly. Target order can differ; exact selected path spelling is
+required. Raw JSON is bounded to 384 KiB; replacement UTF-8 to 24 KiB per file and
+48 KiB total. Every target must have a changed replacement; no-op entries reject
+the set. There is no automatic repair/retry or subset acceptance.
+
+`expected_sha256` maps all selected paths to their pre-inference hashes through
+`ProjectValidation.propose_many` into `ProjectChanges.propose_many`. Map coverage
+must exactly match the proposed paths; `_prepare` checks each baseline, then the
+existing whole-set staging checks apply. No proposals become actionable if any
+entry fails. Success returns the ordinary review-set response plus `provider` and
+`model`; it does not apply or execute anything.
+
+The UI requires disclosure approval listing all targets, locks project controls
+during generation, and retains the prior visible set on failure. Success reuses
+the independent per-file review, Apply, Rollback and refresh controls below.
+Provider-fixture tests cover exact bounds, scope, stale sources, shared locking
+and HTTP authorization/error paths. Browser DOM-event checks verify disclosure
+cancellation, no preview writes, retained review on error, control locking and
+separately confirmed Apply/CRLF-preserving rollback against real temporary files.
+These are workflow checks, not live-model generation-quality evidence.
 
 ## Bounded multi-file preview
 
@@ -188,9 +220,9 @@ or Rollback confirmation. Failures mark a card unverified and block further muta
 until refresh; successful files remain visibly applied when another file fails.
 Refresh reports recorded state without rechecking on-disk hashes. Files are not
 applied atomically and no automatic rollback-on-error is attempted. Browser reload
-loses the set view; restart/expiry loses proposal bytes. This is operator-authored
-multi-file preview/review, not multi-file model generation or a durable engineering
-task scheduler. It executes no project code.
+loses the set view; restart/expiry loses proposal bytes. Sets may be operator-authored
+or generated through the bounded draft-set service above. This is not a durable
+engineering task scheduler. It executes no project code.
 
 ## Operational invariants
 
