@@ -108,6 +108,30 @@ this is not isolation from hostile processes. No crash-safe multi-file journal o
 automatic compensation is implemented. Refresh after expiry/restart cannot recover
 lost rollback bytes. Back up important projects independently.
 
+## Drafting task cancellation and budgets
+
+`POST /api/project/draft-tasks` requires literal source-disclosure confirmation;
+`POST /api/project/draft-tasks/<id>/cancel` requires separate literal confirmation.
+Both retain Host/Origin checks. GET list/status routes retain Host checks and
+expose only this handler's process-local tasks. IDs are not authentication tokens.
+No new filesystem, execution, remote-access or inference-provider privileges are
+granted. Existing direct drafting endpoints remain compatible.
+
+Only one task worker may run/drain at once; the same drafting-service lock also
+prevents concurrent direct generation. Cancellation is cooperative: it rejects
+late output but cannot stop an in-flight Ollama call or undo disclosure already
+made. Budgets (integer 10-120 seconds) gate output acceptance at phase boundaries
+and after syntax validation, not provider computation or total wall-clock time.
+Once staging acceptance wins the task lock, cancellation cannot undo it. There is
+no thread killing, automatic retry, compensation, or project command execution.
+Cancelled/timed-out workers retain their slot until they exit.
+
+Latest 20 task records/results are retained in RAM; restart loses them and no task
+auto-resumes. Finished output remains subject to proposal expiry and separately
+confirmed Apply. Instructions/source are transient worker input, not a durable
+task journal. Failures are explicitly reported and logged with task ID. A lost
+start/cancel response must be reconciled via Find/Refresh, not blindly retried.
+
 ## Review checkpoints
 
 Review recovery uses `GET /api/project/checkpoints` under the existing Host check.

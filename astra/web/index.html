@@ -112,6 +112,16 @@
               <label for="project-set-instruction">Coordinated change for local model</label>
               <textarea id="project-set-instruction" maxlength="4000" rows="3" placeholder="Describe the change across all selected files. Every target must receive a changed, complete replacement."></textarea>
               <button id="project-set-draft" class="ghost" type="button">Generate multi-file draft</button>
+              <label for="project-task-budget">Draft acceptance budget (10-120 seconds)</label>
+              <input id="project-task-budget" type="number" min="10" max="120" value="120">
+              <label for="project-task-id">Draft task ID (copy to resume status after reload; lost on server restart)</label>
+              <input id="project-task-id" maxlength="128" spellcheck="false">
+              <button id="project-task-refresh" class="ghost" type="button">Refresh draft task</button>
+              <button id="project-task-list" class="ghost" type="button">Find draft tasks</button>
+              <button id="project-task-cancel" class="ghost" type="button">Cancel draft task</button>
+              <button id="project-task-load" class="ghost" type="button">Load completed draft review</button>
+              <p id="project-task-status" class="notice" role="status">No task selected. Cancellation discards late output; it cannot interrupt an in-flight inference call. Refresh status explicitly; no automatic retry or task resumption.</p>
+              <ul id="project-task-list-results" class="memorylist" aria-label="Current-process drafting tasks"></ul>
               <p class="notice">Requires approval to send every selected on-disk file verbatim plus bounded repository evidence to local inference. Review for secrets first. Maximum 48 KiB source total. Drafting only stages diffs; it never applies changes or runs tests.</p>
               <p class="notice">Submit 1-5 existing files as a JSON array of {"path":"sample.py","content":"complete replacement"}. Maximum 48 KiB total UTF-8 content; each file stays within 24 KiB. Preview never writes files. Each Apply is independent: a partially applied set is not atomic.</p>
               <label for="project-set-input">Replacement files (JSON array)</label>

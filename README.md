@@ -267,7 +267,8 @@ proposals become actionable. Select only files that need changes. Single- and
 multi-file generation share one concurrency allowance. There is no automatic
 retry or repair. A failed request retains the previous visible review set.
 
-Success displays ordinary per-file diffs and provider/model identity.
+After completion, **Load completed draft review** displays ordinary per-file diffs
+and validation results; the task result also includes provider/model identity.
 **Generation writes no project files:** review and separately confirm each Apply.
 No tests or builds execute, and application remains non-atomic across files.
 Controlled provider/browser fixtures verify this pipeline, not live model quality.
@@ -288,6 +289,46 @@ the visible set does not undo applied changes or discard pending server proposal
 Keep necessary proposal IDs and review the existing change history before leaving.
 There is no multi-file transactional filesystem commit, crash recovery, automatic
 retry, new-file creation, dependency ordering, or test/build execution.
+
+### Cancellable drafting tasks
+
+The multi-file generation button now starts a **process-local drafting task**
+instead of holding a browser request open for inference. Set an integer
+**10-120 second acceptance budget**, approve source disclosure, then use:
+
+- **Refresh draft task** to read its current phase, worker status and error.
+- **Cancel draft task** to prevent accepting its output if staging has not won
+  the cancellation race.
+- **Load completed draft review** to explicitly replace visible reviews, after
+  checking that every proposal still exists. Apply remains separately confirmed.
+- **Find draft tasks** to recover an ID after browser reload or a lost start
+  response. The latest 20 tasks are retained; oldest inactive tasks are evicted
+  when capacity is needed. There is no automatic polling or retry.
+
+Tasks report queued/preparing/inference/validating/completed/failed,
+cancel_requested/cancelled, or timed_out. **Cancellation cannot interrupt an
+in-flight provider call.** The worker remains active while that call drains,
+and no second task is accepted until it exits. Late cancelled/timed-out output
+is discarded before staging. Single-file and direct synchronous multi-file
+requests still share the existing inference lock.
+
+The budget uses monotonic elapsed time and is checked at phase boundaries and
+again after syntax validation before accepting staging. It is not a hard wall-
+clock, GPU, token, or transport deadline: parsing, file access, and an already
+accepted staging/audit operation are not forcibly interrupted. Cancellation is
+serialized against validation/staging acceptance; if staging wins, cancellation
+reports completed rather than pretending the proposals were undone.
+
+Task IDs, phases, errors and result references are RAM-only. Reload can rediscover
+them while the same server process lives; restart cannot. Instructions and source
+are used transiently for the running draft, not persisted as task records. Completed
+task results do not extend proposal expiry or restore lost rollback bytes.
+Failures are reported explicitly and logged; no repair, retry, write or project
+command is automatically performed. This is not a durable task scheduler or an
+autonomous engineering loop.
+
+The existing synchronous `/api/project/draft-set` endpoint remains available for
+compatibility; the new controls use `/api/project/draft-tasks`.
 
 ### Review checkpoints and reload recovery
 

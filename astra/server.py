@@ -11,6 +11,7 @@ from .inference import ModelError
 from .project_validation import ProjectSyntaxError
 from .project_changes import ProjectDraftConflict
 from .project_drafting import ProjectDrafting
+from .drafting_tasks import DraftingTasks
 
 WEB_DIR = Path(__file__).parent / "web"
 ASSETS = {"/": ("index.html", "text/html; charset=utf-8"), "/app.css": ("app.css", "text/css; charset=utf-8"), "/project.css": ("project.css", "text/css; charset=utf-8"), "/app.js": ("app.js", "application/javascript; charset=utf-8")}
@@ -19,6 +20,7 @@ MAX_BODY = 65536
 
 def make_handler(core: AstraCore):
     drafting = ProjectDrafting(core.provider, core.repository) if core.repository is not None else None
+    drafting_tasks = DraftingTasks(drafting) if drafting is not None else None
 
     class AstraHandler(BaseHTTPRequestHandler):
         def _headers(self, status, content_type, length, *, download_name=None):
@@ -158,6 +160,23 @@ def make_handler(core: AstraCore):
                     self._send(200, core.repository.changes.audit_log())
                 except OSError as exc:
                     self._send(500, {"error": f"Project audit log unavailable: {exc.strerror or str(exc)}"})
+            elif url.path == "/api/project/draft-tasks":
+                if drafting_tasks is None:
+                    self._send(404, {"error": "Project context is not enabled"})
+                    return
+                self._send(200, drafting_tasks.list_tasks())
+            elif url.path.startswith("/api/project/draft-tasks/"):
+                if drafting_tasks is None:
+                    self._send(404, {"error": "Project context is not enabled"})
+                    return
+                parts = url.path.strip("/").split("/")
+                if len(parts) != 4:
+                    self._send(404, {"error": "Not found"})
+                    return
+                try:
+                    self._send(200, {"task": drafting_tasks.status(parts[3])})
+                except LookupError as exc:
+                    self._send(404, {"error": str(exc)})
             elif url.path == "/api/project/checkpoints":
                 if core.repository is None:
                     self._send(404, {"error": "Project context is not enabled"})
@@ -241,6 +260,26 @@ def make_handler(core: AstraCore):
                 elif path == "/api/history/clear":
                     core.clear_history(body.get("session", "default"))
                     self._send(200, {"cleared": True})
+                elif path == "/api/project/draft-tasks":
+                    if drafting_tasks is None:
+                        self._send(404, {"error": "Project context is not enabled"})
+                        return
+                    self._send(202, {"task": drafting_tasks.start(
+                        body.get("paths"), body.get("instruction"), confirmed=body.get("confirm") is True,
+                        budget_seconds=body.get("budget_seconds", 120),
+                    )})
+                elif path.startswith("/api/project/draft-tasks/"):
+                    if drafting_tasks is None:
+                        self._send(404, {"error": "Project context is not enabled"})
+                        return
+                    parts = path.strip("/").split("/")
+                    if len(parts) != 5 or parts[4] != "cancel":
+                        self._send(404, {"error": "Not found"})
+                        return
+                    try:
+                        self._send(200, {"task": drafting_tasks.cancel(parts[3], confirmed=body.get("confirm") is True)})
+                    except LookupError as exc:
+                        self._send(404, {"error": str(exc)})
                 elif path == "/api/project/draft":
                     if drafting is None:
                         self._send(404, {"error": "Project context is not enabled"})

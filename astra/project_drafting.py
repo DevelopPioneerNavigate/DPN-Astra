@@ -77,7 +77,7 @@ class ProjectDrafting:
         finally:
             self._lock.release()
 
-    def draft_many(self, paths, instruction, *, confirmed=False):
+    def draft_many(self, paths, instruction, *, confirmed=False, progress=None, stage=None):
         self._check_request(instruction, confirmed)
         if not isinstance(paths, list) or not 1 <= len(paths) <= MAX_CHANGE_SET_FILES:
             raise ValueError(f"Select 1-{MAX_CHANGE_SET_FILES} existing files for drafting")
@@ -86,6 +86,8 @@ class ProjectDrafting:
         if not self._lock.acquire(blocking=False):
             raise ProjectDraftConflict("A project draft is already running; wait for it to finish")
         try:
+            if progress is not None:
+                progress("preparing")
             files = [self.repository.changes.read_file(path) for path in paths]
             if len({os.path.normcase(file["path"]) for file in files}) != len(files):
                 raise ValueError("Draft targets cannot contain duplicate files")
@@ -103,7 +105,11 @@ class ProjectDrafting:
                 {"role": "system", "content": SET_DRAFT_SYSTEM},
                 {"role": "user", "content": request},
             ]
+            if progress is not None:
+                progress("inference")
             result = self._generate(messages, MAX_CHANGE_SET_BYTES * 8)
+            if progress is not None:
+                progress("validating")
             if not isinstance(result, dict) or set(result) != {"files"}:
                 raise ModelError("Draft-set response must contain exactly one files array")
             entries = result["files"]
@@ -116,7 +122,10 @@ class ProjectDrafting:
                     raise ValueError("Draft output must include every selected target exactly once, with no extra paths")
             except ValueError as exc:
                 raise ModelError(f"Invalid draft set: {exc}") from exc
-            response = self.repository.validation.propose_many(entries, expected_sha256=baselines)
+            response = (
+                stage(entries, baselines) if stage is not None
+                else self.repository.validation.propose_many(entries, expected_sha256=baselines)
+            )
             response.update({"provider": self.provider.name, "model": self.provider.model})
             return response
         finally:

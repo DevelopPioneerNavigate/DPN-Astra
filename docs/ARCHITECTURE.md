@@ -166,6 +166,9 @@ does not prove live-model quality or provide a sandbox.
 
 ### Coordinated local-model draft sets
 
+The synchronous draft-set endpoint below remains available; the console now uses
+the process-local task wrapper described in the next section.
+
 `POST /api/project/draft-set` accepts `paths` (1-5 existing eligible relative
 paths), `instruction`, and literal `confirm: true`. It uses the same service,
 concurrency lock, inference interface and error statuses as single-file drafting.
@@ -195,6 +198,49 @@ and HTTP authorization/error paths. Browser DOM-event checks verify disclosure
 cancellation, no preview writes, retained review on error, control locking and
 separately confirmed Apply/CRLF-preserving rollback against real temporary files.
 These are workflow checks, not live-model generation-quality evidence.
+
+## Budgeted drafting task lifecycle
+
+`DraftingTasks` wraps the existing shared `ProjectDrafting` service. One daemon
+worker runs a single approved multi-file generation; it is not an autonomous loop
+and does not outlive the application process. At most 20 task records/results are
+retained, with oldest inactive records evicted on capacity. No task records are
+written to SQLite and no task auto-resumes after restart.
+
+Routes:
+- `POST /api/project/draft-tasks`: `paths`, `instruction`, literal `confirm: true`,
+  integer `budget_seconds` (10-120, default 120), returning 202 and task status.
+- `GET /api/project/draft-tasks`: bounded newest-first summaries without results.
+- `GET /api/project/draft-tasks/<id>`: phase, worker activity, error and result
+  only after worker exit; 404 for absent/restarted/evicted tasks.
+- `POST /api/project/draft-tasks/<id>/cancel`: literal `confirm: true`; cancellation
+  is idempotent and completed output is not undone.
+
+Start validates disclosure/instruction/shape/budget before spawning. Target reads
+and remaining validation use the existing drafting path in the worker. Busy/draining
+workers cause 409; failures become explicit failed status with logging. Expected
+cooperative stops do not masquerade as provider failure. The drafting lock still
+serializes direct single-file, synchronous set and task generation.
+
+Phase hooks check cancellation/monotonic elapsed budget before preparation,
+inference and validation. A task-lock-protected staging callback checks again
+after syntax validation, before invoking existing whole-set staging. Cancel and
+staging acceptance are serialized: a successful cancel prevents actionable output;
+if staging already won, cancel reports completed. `cancel_requested` becomes
+`cancelled` when the worker exits. Budget exhaustion reports `timed_out` with
+independent `worker_active`, which remains true during provider draining.
+
+These are output-acceptance limits, not transport interruption or hard process,
+GPU/token or wall-clock quotas. The provider may keep computing after cancellation
+or timeout; parsing, I/O and accepted staging are not preempted. No new task starts
+until the worker exits, preventing abandoned-call thread accumulation.
+
+The console starts tasks without a long-lived browser request, offers manual
+Find/Refresh/Cancel and explicitly loads completed reviews. It validates that all
+proposal IDs remain available before replacing the visible set. Task discovery
+supports a browser reload or lost start response; it does not restore tasks after
+server restart or extend proposal/rollback expiry. No tests/builds are executed,
+no task result auto-applies, and no retry/repair/scheduling loop is implemented.
 
 ## Bounded multi-file preview
 

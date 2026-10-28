@@ -964,32 +964,107 @@
       $("project-set-status").textContent = "Select 1-5 existing files and describe a coordinated change.";
       return;
     }
-    if (reviewSet.length && !confirm("Replace the visible review set on success? Existing proposals remain until expiry; applied changes are NOT undone. Keep any rollback IDs you need.")) return;
     if (!confirm("Send these on-disk files verbatim plus bounded repository evidence to local inference?\n\n"
       + paths.join("\n") + "\n\nReview for secrets first. Unsaved editor text is not used. Generation only stages diffs; no writes or tests run.")) return;
+    const budget = Number($("project-task-budget").value);
+    if (!Number.isInteger(budget) || budget < 10 || budget > 120) {
+      $("project-task-status").textContent = "Choose an integer budget from 10 to 120 seconds.";
+      return;
+    }
     const controls = [...document.querySelectorAll("#project-inspector button, #project-inspector input, #project-inspector textarea")];
     const states = controls.map(control => control.disabled);
     lockReviewSet(true);
     controls.forEach(control => { control.disabled = true; });
-    $("project-set-status").textContent = "Generating coordinated local-model drafts. No writes or commands...";
+    $("project-task-status").textContent = "Starting local drafting task. No writes or commands...";
     let outcome = "";
     try {
-      const response = await api("/api/project/draft-set", {
-        method: "POST", body: JSON.stringify({ paths, instruction, confirm: true })
+      const response = await api("/api/project/draft-tasks", {
+        method: "POST", body: JSON.stringify({ paths, instruction, confirm: true, budget_seconds: budget })
       });
-      reviewSet = response.changes.map(entry => ({ ...entry, uncertain: false, error: "" }));
-      outcome = " Drafted by " + response.provider + " / " + response.model
-        + ". Review every diff; no files written and no tests executed.";
-      refreshProjectHistory();
+      $("project-task-id").value = response.task.id;
+      showDraftTask(response.task);
+      outcome = " Task accepted. Use Refresh draft task, then Load completed draft review. Previous review retained.";
     } catch (error) {
-      outcome = "Multi-file model draft failed: " + error.message
-        + ". No draft was applied. The previous visible set is retained.";
+      outcome = "Could not start drafting task: " + error.message
+        + ". A lost response may leave a running task; do not assume no task started. No draft was applied.";
     } finally {
       controls.forEach((control, index) => { control.disabled = states[index]; });
       lockReviewSet(false);
-      $("project-set-status").textContent += " " + outcome;
+      $("project-task-status").textContent += " " + outcome;
     }
   });
+
+  function showDraftTask(task) {
+    $("project-task-status").textContent = "Task " + task.id + " / " + task.state
+      + " / worker " + (task.worker_active ? "active (may be draining)" : "exited")
+      + " / acceptance budget " + task.budget_seconds + "s. "
+      + (task.error || "No task error recorded.")
+      + " Transport interruption is unsupported. No project writes or tests executed."
+      + (task.result ? " Provider: " + task.result.provider + " / " + task.result.model + "." : "")
+      + (task.state === "completed" ? " Load the review explicitly; proposals still expire after 15 minutes or restart." : "");
+  }
+
+  $("project-task-list").addEventListener("click", async () => {
+    if (reviewSetBusy) return;
+    const button = $("project-task-list");
+    button.disabled = true;
+    try {
+      const response = await api("/api/project/draft-tasks");
+      const list = $("project-task-list-results");
+      list.replaceChildren();
+      for (const task of response.tasks) {
+        const item = document.createElement("li");
+        const select = document.createElement("button");
+        select.type = "button";
+        select.className = "ghost";
+        select.textContent = task.id + " / " + task.state + " / " + task.paths.join(", ");
+        select.addEventListener("click", () => {
+          $("project-task-id").value = task.id;
+          $("project-task-status").textContent = "Task selected. Refresh its current status before taking action.";
+        });
+        item.append(select);
+        list.append(item);
+      }
+      $("project-task-status").textContent = response.tasks.length
+        + " current-process task(s). Latest 20 retained; no automatic retries or resumption. Select a task and refresh status.";
+    } catch (error) {
+      $("project-task-status").textContent = "Could not list draft tasks: " + error.message;
+    } finally { button.disabled = false; }
+  });
+
+  for (const action of ["refresh", "cancel", "load"]) {
+    $("project-task-" + action).addEventListener("click", async () => {
+      if (reviewSetBusy) return;
+      const id = $("project-task-id").value.trim();
+      if (!id) { $("project-task-status").textContent = "Enter a draft task ID first."; return; }
+      if (action === "cancel" && !confirm("Cancel acceptance of this draft's output? In-flight inference cannot be interrupted. Already staged proposals will not be undone.")) return;
+      if (action === "load" && reviewSet.length && !confirm("Replace visible reviews with this task's completed proposals? Applied changes are not undone.")) return;
+      const button = $("project-task-" + action);
+      button.disabled = true;
+      try {
+        const base = "/api/project/draft-tasks/" + encodeURIComponent(id);
+        const response = await api(base + (action === "cancel" ? "/cancel" : ""),
+          action === "cancel" ? { method: "POST", body: JSON.stringify({ confirm: true }) } : undefined);
+        showDraftTask(response.task);
+        if (action === "load") {
+          if (response.task.state !== "completed" || response.task.worker_active || !response.task.result) {
+            throw new Error("Task has no completed review result available");
+          }
+          const entries = [];
+          for (const entry of response.task.result.changes) {
+            const current = await api("/api/project/proposals/" + encodeURIComponent(entry.proposal.id));
+            entries.push({ ...entry, proposal: current.proposal, uncertain: false, error: "" });
+          }
+          reviewSet = entries;
+          renderReviewSet();
+          refreshProjectHistory();
+        }
+      } catch (error) {
+        $("project-task-status").textContent = "Draft task " + action + " failed or response was lost: "
+          + error.message + ". Refresh status before retrying. Previous visible reviews retained.";
+      } finally { button.disabled = false; }
+    });
+  }
 
   $("project-set-refresh").addEventListener("click", async () => {
     if (reviewSetBusy || !reviewSet.length) return;
