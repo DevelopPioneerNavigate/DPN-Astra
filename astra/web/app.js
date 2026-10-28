@@ -96,7 +96,8 @@
       const ready = model.connected && model.model_installed;
       $("project-state").textContent = status.project_context.enabled ? "READ-ONLY PROJECT CONTEXT: ON" : "PROJECT CONTEXT: OFF";
       $("project-inspector").hidden = !status.project_context.enabled;
-      statusChip.textContent = ready ? "MODEL ONLINE" : model.connected ? "MODEL NOT INSTALLED" : "OLLAMA OFFLINE";
+      statusChip.textContent = ready ? "MODEL ONLINE" : model.connected ? "MODEL NOT INSTALLED" : "PROVIDER UNAVAILABLE";
+      statusChip.title = model.error || status.provider;
       statusChip.classList.toggle("good", ready);
       const descriptions = {
         CORE: "Reasoning engine", SENSE: "Instrument telemetry", COMMAND: "Authorized operations",
@@ -159,36 +160,158 @@
     } catch (error) { report(error); }
   });
 
-  async function refreshMemories() {
+  let memoryBeforeId = null;
+  let memoryNextId = null;
+  let editingMemory = null;
+  let memoryLoading = false;
+  let memorySaving = false;
+
+  function cancelMemoryEdit() {
+    editingMemory = null;
+    $("memory-input").value = "";
+    $("memory-source").value = "";
+    $("memory-kind").value = "note";
+    $("memory-save").textContent = "Save";
+    $("memory-cancel").hidden = true;
+    $("memory-edit-status").textContent = "";
+  }
+
+  $("memory-cancel").addEventListener("click", cancelMemoryEdit);
+  $("memory-export").addEventListener("click", async () => {
+    if (!confirm("Download all saved memories, including fiction and source references, as unencrypted JSON? Keep the file private.")) return;
+    const button = $("memory-export");
+    const status = $("memory-export-status");
+    button.disabled = true;
+    status.textContent = "Preparing complete memory export...";
     try {
-      const { memories } = await api("/api/memories");
-      $("memory-count").textContent = memories.length + " ENTRIES";
+      const data = await api("/api/memories/export", { method: "POST", body: "{}" });
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "astra-memories.json";
+      document.body.append(link);
+      try { link.click(); }
+      finally {
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      status.textContent = "Download requested for " + data.memory_count
+        + " memories. Confirm the file was saved by your browser; it is not encrypted.";
+    } catch (error) {
+      status.textContent = "Memory export failed: " + error.message;
+      report(error);
+    } finally { button.disabled = false; }
+  });
+  $("memory-newest").addEventListener("click", () => refreshMemories(null));
+  $("memory-older").addEventListener("click", () => {
+    if (memoryNextId !== null) refreshMemories(memoryNextId);
+  });
+
+  async function refreshMemories(beforeId = memoryBeforeId) {
+    if (memoryLoading) return;
+    memoryLoading = true;
+    $("memory-newest").disabled = true;
+    $("memory-older").disabled = true;
+    try {
+      const { memories, next_before_id: nextId } = await api(
+        "/api/memories" + (beforeId === null ? "" : "?before_id=" + beforeId)
+      );
+      memoryBeforeId = beforeId;
+      memoryNextId = nextId;
+      $("memory-count").textContent = memories.length + (beforeId === null ? " NEWEST ENTRIES" : " OLDER ENTRIES");
       const list = $("memory-list");
       list.replaceChildren();
       for (const memory of memories) {
         const li = document.createElement("li");
-        const span = document.createElement("span"); span.textContent = memory.note;
+        const span = document.createElement("span");
+        const text = document.createElement("span"); text.textContent = memory.note;
+        const metadata = document.createElement("small");
+        metadata.className = "memory-metadata";
+        metadata.textContent = memory.kind + " | " + memory.provenance
+          + " | " + (memory.consented_at ? "Saved with approval: " + memory.consented_at : "Legacy note; consent time unknown")
+          + (memory.source ? " | Source (user-supplied): " + memory.source : "")
+          + " | Revision " + memory.revision
+          + (memory.updated_at ? " | Edited: " + memory.updated_at : "")
+          + (memory.kind === "fiction" ? " | Excluded from chat memory" : "");
+        span.append(text, metadata);
+        const actions = document.createElement("div"); actions.className = "memory-actions";
+        const edit = document.createElement("button"); edit.type = "button"; edit.textContent = "Edit";
+        edit.disabled = memorySaving;
+        edit.setAttribute("aria-label", "Edit memory " + memory.id);
+        edit.addEventListener("click", () => {
+          if (($("memory-input").value || $("memory-source").value)
+            && !confirm("Discard the current unsaved memory draft?")) return;
+          editingMemory = memory;
+          $("memory-input").value = memory.note;
+          $("memory-source").value = memory.source;
+          $("memory-kind").value = memory.kind;
+          $("memory-save").textContent = "Save changes";
+          $("memory-cancel").hidden = false;
+          $("memory-edit-status").textContent = "Editing memory " + memory.id
+            + ", revision " + memory.revision + ". Saving approves retention of the revised entry.";
+          $("memory-input").focus();
+        });
         const button = document.createElement("button"); button.type = "button"; button.textContent = "Forget";
+        button.disabled = memorySaving;
         button.setAttribute("aria-label", "Forget memory " + memory.id);
         button.addEventListener("click", async () => {
-          try { await api("/api/memories/" + memory.id, { method: "DELETE" }); await refreshMemories(); }
+          try {
+            await api("/api/memories/" + memory.id, { method: "DELETE" });
+            if (editingMemory && editingMemory.id === memory.id) cancelMemoryEdit();
+            await refreshMemories();
+          }
           catch (error) { report(error); }
         });
-        li.append(span, button); list.append(li);
+        actions.append(edit, button);
+        li.append(span, actions); list.append(li);
       }
-    } catch (error) { report(error); }
+      return true;
+    } catch (error) {
+      report(error);
+      return false;
+    }
+    finally {
+      memoryLoading = false;
+      $("memory-newest").disabled = memorySaving;
+      $("memory-older").disabled = memorySaving || memoryNextId === null;
+    }
   }
 
   $("memory-form").addEventListener("submit", async event => {
     event.preventDefault();
     const note = $("memory-input").value.trim();
     if (!note) return;
+    if (memorySaving) return;
+    memorySaving = true;
+    for (const control of document.querySelectorAll("#memory-form input, #memory-form select, #memory-form button, #memory-list button, .memory-navigation button")) {
+      control.disabled = true;
+    }
+    const edited = editingMemory;
     try {
-      await api("/api/memories", { method: "POST", body: JSON.stringify({ note }) });
-      $("memory-input").value = "";
-      await refreshMemories();
-      notice.textContent = "Memory saved locally at your explicit request.";
-    } catch (error) { report(error); }
+      await api(edited ? "/api/memories/" + edited.id + "/edit" : "/api/memories", {
+        method: "POST", body: JSON.stringify({
+          note, kind: $("memory-kind").value, source: $("memory-source").value.trim(),
+          ...(edited ? { revision: edited.revision } : {})
+        })
+      });
+      cancelMemoryEdit();
+      const refreshed = await refreshMemories(edited ? memoryBeforeId : null);
+      notice.textContent = (edited ? "Memory updated locally at your explicit request."
+        : "Memory saved locally at your explicit request.")
+        + (refreshed ? "" : " Could not refresh the memory list; use Newest memories to reload.");
+    } catch (error) {
+      report(error);
+      $("memory-edit-status").textContent = "Save failed: " + error.message
+        + ". Your draft is retained. For a conflict, copy it before reloading the entry.";
+    }
+    finally {
+      memorySaving = false;
+      for (const control of document.querySelectorAll("#memory-form input, #memory-form select, #memory-form button, #memory-list button")) {
+        control.disabled = false;
+      }
+      $("memory-newest").disabled = memoryLoading;
+      $("memory-older").disabled = memoryLoading || memoryNextId === null;
+    }
   });
 
   $("project-search-form").addEventListener("submit", async event => {

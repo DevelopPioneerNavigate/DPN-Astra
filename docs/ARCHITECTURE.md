@@ -28,9 +28,85 @@ flowchart LR
 2. **SENSE**: versioned, signed, read-only instrument drivers, calibration metadata, sensor provenance, monotonic timestamps, and fault states. Nothing is connected in v0.1.
 3. **COMMAND**: capability-scoped permission broker with explicit approval, dry-run preview, asset allowlists, audit trails, emergency independent mechanical interlocks, and revocation. In v0.1 all requests are denied.
 4. **WATCH**: authorized ingest from DPN WatchTower/ECS/NOC only after authentication, data minimization, and alert acceptance criteria. No fictional telemetry.
-5. **ARCHIVE**: user-visible memory capture, granular removal, provenance and retention policy. In v0.1 explicit notes only, plain SQLite on the host.
+5. **ARCHIVE**: user-visible categorized memory capture, granular removal and save provenance in versioned plain SQLite. Retention policies and encryption remain pending.
 6. **CONTINUITY**: encrypted snapshots, signed manifests, restores tested against versioned schema, and eventually offline redundancies. Not implemented in v0.1.
 7. **PRESENCE**: DPN black/red command console, silver/violet/red holographic motif, chat and optional browser-based voice. No claimed physical hologram.
+
+## Local inference contract
+
+`astra/inference.py` defines the structural `InferenceProvider` protocol, typed `ChatMessage` and `ModelHealth` payloads, and the shared `ModelError`. CORE and the HTTP layer use this boundary rather than Ollama-specific identity or error definitions. Existing imports of `ModelError` from `astra.provider` remain compatible. Ollama is still the only production adapter; alternate adapters, model installation, and routing are not implemented.
+
+The Ollama transport validates model-list and chat response shapes, caps each response at 4 MiB, and converts network, HTTP, decoding, and schema failures into explicit model errors. Health retains the existing JSON keys and adds an `error` diagnostic on failure or a missing selected model. Status displays the adapter's own name and the UI surfaces its diagnostic in a tooltip. Failed inference does not append conversation history. The adapter enforces the same loopback URL restrictions as environment configuration, ignores proxy environment variables, and rejects redirects before following them. Socket timeouts remain two seconds for health and 120 seconds for chat; no total request deadline is claimed.
+
+Loopback HTTP fixture tests exercise the real request/response transport and its integration with readiness, status, chat error responses, and history preservation. Fixture replies are not generated-model evidence or security sandboxing.
+
+## Structured memory foundation
+
+`Archive` uses SQLite `PRAGMA user_version = 2`. Startup takes a `BEGIN IMMEDIATE`
+transaction before inspecting/migrating the schema, serializing concurrent
+initializers. Version-zero three-column memories gain `kind`, `provenance`,
+`source`, and nullable `consented_at` fields without rewriting IDs or note timestamps.
+Versions zero and one then gain `revision` (initially 1) and nullable `updated_at`.
+Any failed migration rolls back schema/data/version changes. Unsupported future or
+incomplete schemas raise an explicit startup error.
+
+`remember(note, *, kind="note", source="")` remains compatible with note-only
+callers and is an explicit retention operation. Allowed kinds are `note`,
+`preference`, `decision`, `episode`, `procedure`, `hypothesis`, and `fiction`.
+Notes remain bounded to 1,000 characters; source references to 240. The application
+sets provenance and consent time, never accepts them from request metadata.
+Legacy entries use `legacy_user_note` and null consent time. Source references are
+unverified text, not citations whose contents have been fetched or checked.
+
+GET/POST/DELETE memory routes retain their existing envelope and add metadata to
+records; invalid categories/source values return 400, and SQLite failures return
+explicit 503 errors. GET now also returns `next_before_id`; pass it as `?before_id=`
+for the next descending-ID page of up to 40 entries. A null cursor marks the end.
+Filtering uses an exclusive ID bound, so inserts between requests do not duplicate
+or skip older records. Pages are not a transactionally frozen archive snapshot.
+
+`POST /api/memories/<id>/edit` replaces the note/category/source using an explicit
+positive integer `revision` from the reviewed record. Like creation, category/source
+default to `note`/empty when omitted. It validates with the same rules as creation
+and conditionally updates inside a write transaction. The first successful writer
+increments the revision; stale revisions return 409, missing entries 404, malformed
+inputs 400, and storage failures 503. Successful edits preserve creation and first
+known consent, set `updated_at`, and record `user_edit` provenance. Legacy notes gain
+their first known consent time only when explicitly edited. Counters detect stale
+writes but do not preserve old content or implement procedural workflow versioning.
+Existing DELETE behavior remains ID-based, without revision preconditions.
+
+The UI displays categories, sources, revision/edit timestamps and save provenance, using
+text nodes. CORE retrieves the newest 20 non-fiction entries, filtering before
+limiting, and qualifies them as unverified, non-authoritative references. Fiction
+remains in Archive, separate from normal chat context. Conversation remains
+RAM-only. This is not a full layered-memory engine: project partitioning,
+retention, evidence verification, procedural versioning, encryption and backup
+automation remain unfinished.
+
+### Export and SQLite recovery boundary
+
+`Archive.export_json()` emits format-version-1 `dpn-astra-memory-export` UTF-8 JSON.
+Count and ascending-ID records share a SQLite read transaction; all categories and
+metadata are included regardless of console pagination or fiction context filtering.
+It buffers no more than 4 MiB of serialized output and rejects archives exceeding
+10,000 records. There is no partial-success export. `POST /api/memories/export`
+requires the existing write Host/Origin checks and returns an attachment or 413
+for an exceeded bound / 503 for SQLite errors. The UI confirms plaintext disclosure
+and requests a browser download; it does not claim that a file was successfully
+saved to disk. GET does not trigger an export. JSON importing is not implemented.
+
+`astra.memory_backup` provides local `snapshot SOURCE NEW_DESTINATION` and
+`verify PATH` commands. SQLite backup copies committed pages, including WAL data.
+The utility reserves a new destination exclusively, checks integrity/current schema,
+flushes it, and removes it on ordinary failure. The copy stage has a 30-second
+deadline checked by the backup progress callback; verification is not deadline-bound.
+Sources are opened read-only and no migration is performed. Recovery uses the same
+snapshot operation into a new data directory with ASTRA stopped. Tests compare all
+record fields and autoincrement sequencing after reopening the recovered database.
+This does not back up the separate project audit database, model files or runtime
+configuration and does not provide encryption, secure erasure, authenticated
+manifests, automatic scheduling, power-loss guarantees, or full-system recovery.
 
 ## Operational invariants
 
@@ -43,7 +119,7 @@ flowchart LR
 
 ## Implementation reality
 
-This is a single-user localhost prototype, not a remote multi-tenant service. Session conversations are RAM-only, unencrypted SQLite is used only for intentionally saved facts, and model inference runs via an operator-managed Ollama instance. An optional `ASTRA_PROJECT_DIR` enables bounded, read-only source retrieval with relative-path and line-number citations; it does not execute or edit project files. The web API does not run tools. No production readiness or external integration is claimed.
+This is a single-user localhost prototype, not a remote multi-tenant service. Session conversations are RAM-only, unencrypted SQLite is used only for intentionally saved memories, and model inference runs via an operator-managed Ollama instance. An optional `ASTRA_PROJECT_DIR` enables bounded, read-only source retrieval with relative-path and line-number citations; it does not execute or edit project files. The web API does not run tools. No production readiness or external integration is claimed.
 
 Startup creates `ASTRA_DATA_DIR` when absent and uses mode `0700` for newly created directories on POSIX platforms; the configured data directory must not be a regular file. The loopback HTTP service provides `/health/live` for process liveness and `/health/ready` for Ollama/model readiness. Readiness reports 503 while Ollama is unavailable or the configured model is absent. These are local supervision probes, not authenticated remote health APIs.
 

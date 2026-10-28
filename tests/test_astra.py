@@ -23,6 +23,7 @@ class AstraTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.archive = Archive(Path(self.tmp.name) / "memory.sqlite")
         self.provider = Mock()
+        self.provider.name = "Test local provider"
         self.provider.model = "test-model"
         self.provider.chat.return_value = "I can help you investigate that, Doctor."
         self.provider.health.return_value = {"connected": True, "model_installed": True, "installed_models": ["test-model"]}
@@ -68,6 +69,7 @@ class AstraTests(unittest.TestCase):
 
     def test_status_truthfulness(self):
         status = self.core.status()
+        self.assertEqual("Test local provider", status["provider"])
         self.assertEqual("disabled", status["modules"]["COMMAND"])
         self.assertFalse(status["project_context"]["enabled"])
         self.assertFalse(status["security"]["remote_actions"])
@@ -161,7 +163,7 @@ class AstraTests(unittest.TestCase):
                 return False
 
         provider = OllamaProvider("http://127.0.0.1:11434", "llama3.2")
-        with patch("astra.provider.urlopen", return_value=FakeResponse()):
+        with patch.object(provider._opener, "open", return_value=FakeResponse()):
             result = provider.health()
         self.assertTrue(result["connected"])
         self.assertTrue(result["model_installed"])

@@ -10,7 +10,7 @@ ASTRA is a locally hosted AI research companion inspired by ASTRA in *The Diesel
 | Capability | v0.1.0 state |
 | --- | --- |
 | CORE | Real Ollama chat API; model must be installed and running |
-| ARCHIVE | SQLite saved memories, only created when you explicitly click Save; delete per memory |
+| ARCHIVE | Versioned categorized SQLite memory; explicit saves, conflict-checked edits, deletion, JSON export and local snapshot/recovery tools |
 | PRESENCE | Responsive black/red DPN console, binary rain, abstract ASTRA hologram, chat, optional browser speech output and dictation |
 | SENSE | Disabled until instruments are explicitly connected |
 | COMMAND | Deny-by-default stub, no execution permissions |
@@ -43,6 +43,107 @@ ASTRA does **not** claim sentience, genuine emotion, autonomously acting hardwar
 
 No extra Python packages or cloud AI API key are required. Performance depends on the model and your local hardware.
 
+### Consented memory foundation
+
+The Archive saves only deliberately submitted entries, not conversations. The console
+offers notes, preferences, decisions, episodes, procedures, hypotheses, and fiction.
+An optional source reference is stored as user-supplied text, never fetched or treated
+as verified evidence. Each new save records its UTC timestamp and `user_entry`
+provenance. Saving through the local API is the same explicit retention request as
+clicking Save; these markers are not authenticated proof of consent.
+
+Existing three-column and version-1 databases migrate transactionally to schema version 2 while
+preserving note IDs, contents, timestamps, and ID sequencing. Legacy entries are
+labeled `legacy_user_note` with an unknown (`null`) consent timestamp, not retroactively
+assigned a consent event. Newer unsupported or incompatible schemas fail startup
+rather than being overwritten. Stop ASTRA and back up `astra_memory.sqlite3` before
+upgrading; no automatic backup or downgrade is provided. Migrated entries start at
+revision 1 with no invented edit timestamp.
+
+Use **Edit** to load an entry, then **Save changes** to approve its revision.
+**Cancel edit** discards the draft without changing storage. Saves retain the
+original creation timestamp and first known consent time, record a new edit time,
+and increment the revision. A stale revision returns a conflict rather than
+overwriting another edit; your draft remains in the form. Copy it before reloading
+the current entry. These revision counters do not retain historical note contents.
+Editing a legacy entry records its first known consent at that explicit edit.
+
+The latest 20 non-fiction memories may enter chat context, labeled user-supplied and
+not independently verified. Hypotheses are not findings; procedures do not grant
+execution permission. Fiction remains visible/deletable in Archive but is excluded
+from normal memory retrieval. This is prompt-level labeling, not a guarantee of
+model behavior. The console displays 40 entries per page; **Older memories** and
+**Newest memories** make earlier saved entries available for review/edit/deletion.
+Pagination is based on descending IDs, not a frozen snapshot: concurrent inserts
+appear when you return to Newest, and deletions disappear. Storage remains
+unencrypted; project partitions, retention policies, encrypted recovery,
+and evidence verification are not implemented.
+
+### Export and recovery
+
+**Export all memories** requests an unencrypted JSON download after confirmation.
+It includes every category, including fiction, all source references, and original
+save/edit metadata, not just the visible page. The format is
+`dpn-astra-memory-export`, format version 1, with the storage schema version,
+UTC export time, record count, and records in ascending ID order. The export uses
+one SQLite read transaction so its count and contents agree. It refuses exports
+over 10,000 entries or **4 MiB of UTF-8 JSON** instead of silently truncating them.
+For larger archives, use a SQLite snapshot. JSON import is not implemented; JSON
+is a readable portability export, **not a restorable backup**.
+
+The standard-library snapshot command uses SQLite's backup API (including committed
+WAL data), verifies database integrity and the current memory schema, and refuses
+to overwrite any destination. It requests private file permissions on POSIX.
+Verification does not authenticate provenance or validate whether notes are true.
+Snapshot creation has a 30-second copy deadline; verification time depends on file
+size. Parents must already exist. These files are **not encrypted**; protect them
+with appropriate OS access controls/disk encryption. Snapshots can retain deleted
+data in SQLite free pages and are not a secure-erasure mechanism.
+
+Run from the repository root, using your configured Python interpreter. PowerShell:
+
+```powershell
+# Stop ASTRA first for the documented backup/recovery workflow.
+# Use your actual ASTRA_DATA_DIR if it differs from the default.
+$source = Join-Path $HOME ".dpn-astra\astra_memory.sqlite3"
+# Choose an existing private backup directory and a NEW file name.
+$backup = "C:\ASTRA-Backups\memory-2026-10-28.sqlite3"
+python -m astra.memory_backup snapshot $source $backup
+python -m astra.memory_backup verify $backup
+```
+
+Successful commands print JSON with `schema_version`, `memory_count`, and
+`integrity: "ok"` and exit 0. Failures print an explicit error on stderr and exit 1.
+Only current-schema databases are accepted; use ASTRA to migrate older databases
+before snapshotting them. Before migrating an older database, stop ASTRA and preserve
+a filesystem copy of the complete old data directory, including any SQLite
+sidecars; the snapshot utility deliberately does not migrate legacy files.
+Normal copy/verification failures remove the newly created
+destination. A crash or power loss can leave an incomplete file; verify snapshots
+before relying on them. Never assume a snapshot exists just because a path exists.
+
+To recover **without overwriting live data**, stop ASTRA and choose a new empty,
+private data directory. Copy the verified snapshot through the same command:
+
+```powershell
+# Create/secure this new directory first; keep the old data directory untouched.
+$recovered = "C:\ASTRA-Recovered"
+$restored = Join-Path $recovered "astra_memory.sqlite3"
+python -m astra.memory_backup snapshot $backup $restored
+python -m astra.memory_backup verify $restored
+# Continue only if BOTH commands exited successfully.
+$env:ASTRA_DATA_DIR = $recovered
+python run_astra.py
+```
+
+Check saved categories, source references and edit revisions in the console.
+The recovery tests reopen snapshots and compare records, metadata and ID sequencing;
+they also test committed WAL data, corruption and no-overwrite behavior.
+This recovers **memory only**, not the separate project audit database, application
+configuration, model weights, or RAM-only conversations. No scheduled backups,
+automatic retention, JSON restore, encrypted recovery, or full-system disaster
+recovery is claimed.
+
 ### Configuration
 
 All variables are optional:
@@ -74,6 +175,14 @@ For explicit `from module import name` checks, a declared `__all__` is not treat
 For possibly-unused-import hints, a single literal `__all__` list, tuple, or set exempts only imported names it contains. Computed, mutated, conditional, or otherwise ambiguous `__all__` declarations retain the conservative module-wide exclusion; this remains a static heuristic.
 
 If a model is missing or Ollama is stopped, ASTRA reports the real error; it never fabricates a model response.
+
+### Local inference boundary
+
+CORE consumes the typed `InferenceProvider` contract in `astra/inference.py`: adapter identity, selected model, health, and role-tagged chat messages. The shared `ModelError` represents failed inference, not an answer. Ollama remains the only production adapter; this contract does not install models, route tasks, or add llama.cpp/vLLM support.
+
+The Ollama adapter validates JSON response shapes, limits each response to 4 MiB, and exposes diagnostic errors in `model_status.error` (also visible in the status-chip tooltip). Missing models are distinguished from unavailable or malformed provider responses. A failed chat returns HTTP 503 without appending fabricated history. Requests stay on the configured loopback HTTP endpoint: environment proxies and HTTP redirects are not used. Health requests use a two-second socket timeout and chat requests a 120-second socket timeout; these are not total wall-clock deadlines.
+
+Transport tests use controlled local HTTP fixtures, not a running language model. They verify protocol behavior, not inference quality or sandbox isolation.
 
 When `ASTRA_PROJECT_DIR` is enabled, ASTRA stores project-change lifecycle metadata (staged, applied, rolled back, expired) in `ASTRA_DATA_DIR/astra_project_audit.sqlite3`; only the latest 100 events are returned per request, while the ledger itself is retained without automatic truncation. It stores paths, proposal IDs, timestamps, states, and hashes, never source contents. The ledger has a SHA-256 hash chain that can reveal accidental or unsophisticated modification, but it is not authenticated or tamper-proof: someone able to rewrite the database can also recompute the chain. Without a configured project directory, history is process-local and capped at 100 events.
 

@@ -1,11 +1,13 @@
 """Loopback-only HTTP API and local control console."""
 import json
+import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .core import AstraCore
-from .provider import ModelError
+from .archive import MemoryConflict, MemoryNotFound, MemoryExportTooLarge
+from .inference import ModelError
 from .project_validation import ProjectSyntaxError
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -15,10 +17,12 @@ MAX_BODY = 65536
 
 def make_handler(core: AstraCore):
     class AstraHandler(BaseHTTPRequestHandler):
-        def _headers(self, status, content_type, length):
+        def _headers(self, status, content_type, length, *, download_name=None):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(length))
+            if download_name is not None:
+                self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
@@ -86,7 +90,17 @@ def make_handler(core: AstraCore):
                 except ValueError as exc:
                     self._send(400, {"error": str(exc)})
             elif url.path == "/api/memories":
-                self._send(200, {"memories": core.archive.list_memories()})
+                try:
+                    query = parse_qs(url.query, keep_blank_values=True)
+                    cursor = query.get("before_id")
+                    if cursor is not None and (len(cursor) != 1 or not cursor[0].isascii() or not cursor[0].isdecimal()):
+                        raise ValueError("Invalid memory cursor")
+                    before_id = int(cursor[0]) if cursor is not None else None
+                    self._send(200, core.archive.memory_page(before_id=before_id))
+                except ValueError as exc:
+                    self._send(400, {"error": str(exc)})
+                except sqlite3.Error:
+                    self._send(503, {"error": "Memory storage unavailable"})
             elif url.path == "/api/project/files":
                 if core.repository is None:
                     self._send(404, {"error": "Read-only project context is not enabled"})
@@ -141,7 +155,27 @@ def make_handler(core: AstraCore):
                     reply = core.chat(body.get("message"), body.get("session", "default"))
                     self._send(200, {"reply": reply})
                 elif path == "/api/memories":
-                    self._send(201, {"memory": core.archive.remember(body.get("note"))})
+                    self._send(201, {"memory": core.archive.remember(
+                        body.get("note"),
+                        kind=body.get("kind", "note"),
+                        source=body.get("source", ""),
+                    )})
+                elif path == "/api/memories/export":
+                    exported = core.archive.export_json()
+                    self._headers(
+                        200, "application/json; charset=utf-8", len(exported),
+                        download_name="astra-memories.json",
+                    )
+                    self.wfile.write(exported)
+                elif path.startswith("/api/memories/"):
+                    parts = path.strip("/").split("/")
+                    if len(parts) != 4 or parts[3] != "edit":
+                        self._send(404, {"error": "Not found"})
+                        return
+                    self._send(200, {"memory": core.archive.edit(
+                        int(parts[2]), body.get("note"), revision=body.get("revision"),
+                        kind=body.get("kind", "note"), source=body.get("source", ""),
+                    )})
                 elif path == "/api/history/clear":
                     core.clear_history(body.get("session", "default"))
                     self._send(200, {"cleared": True})
@@ -189,6 +223,12 @@ def make_handler(core: AstraCore):
                     self._send(404, {"error": "Not found"})
             except ProjectSyntaxError as exc:
                 self._send(422, {"error": str(exc), "validation": exc.result})
+            except MemoryConflict as exc:
+                self._send(409, {"error": str(exc)})
+            except MemoryNotFound as exc:
+                self._send(404, {"error": str(exc)})
+            except MemoryExportTooLarge as exc:
+                self._send(413, {"error": str(exc)})
             except ValueError as exc:
                 self._send(400, {"error": str(exc)})
             except PermissionError as exc:
@@ -197,6 +237,8 @@ def make_handler(core: AstraCore):
                 self._send(404, {"error": "Project file was not found"})
             except ModelError as exc:
                 self._send(503, {"error": str(exc)})
+            except sqlite3.Error:
+                self._send(503, {"error": "Local database storage unavailable"})
             except OSError as exc:
                 self._send(500, {"error": f"Project file operation failed: {exc.strerror or str(exc)}"})
 
@@ -212,6 +254,8 @@ def make_handler(core: AstraCore):
                 self._send(200, {"deleted": core.archive.forget(value)})
             except ValueError:
                 self._send(400, {"error": "Invalid memory ID"})
+            except sqlite3.Error:
+                self._send(503, {"error": "Memory storage unavailable"})
 
     return AstraHandler
 

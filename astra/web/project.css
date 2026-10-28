@@ -3,3 +3,9 @@
 .change-diff{max-height:260px;overflow:auto;padding:10px;background:#09070e;border:1px solid rgba(255,255,255,.08);color:#cfc4d2;font:10px/1.5 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 .change-history-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:14px}
 .change-workbench [hidden]{display:none}
+.memory-editor{display:grid;gap:8px;margin-top:12px}
+.memory-editor label{color:var(--soft);font-size:11px}
+.memory-editor select{min-width:0;width:100%;font:inherit;background:#0d0a14;color:var(--white);border:1px solid var(--line);padding:8px}
+.memory-metadata{display:block;color:var(--soft);font-size:10px;margin-top:5px;overflow-wrap:anywhere}
+.memory-navigation,.memory-actions{display:flex;gap:8px;flex-wrap:wrap}
+.memory-editor [hidden]{display:none}

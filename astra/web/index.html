@@ -105,12 +105,39 @@
         </details>
         <div class="composer">
           <form id="chat-form"><label class="visuallyhidden" for="message">Message ASTRA</label><textarea id="message" maxlength="4000" rows="3" placeholder="Ask a question. Propose an experiment. Challenge an assumption."></textarea><div class="composerbar"><div><button type="button" id="mic" class="ghost" title="Dictation uses browser microphone permission">◉ Mic</button><button type="button" id="speech" class="ghost" aria-pressed="false" title="Speak replies using browser voices">◈ Voice: Off</button></div><button id="send" type="submit" class="primary">TRANSMIT <span>↗</span></button></div></form>
-          <p id="notice" class="notice">Conversation is in memory only and clears when the process restarts. Saved facts are separate.</p>
+          <p id="notice" class="notice">Conversation is in memory only and clears when the process restarts. Saved memories are separate.</p>
         </div>
         <div class="memory">
           <div class="memorytitle"><span class="eyebrow">ARCHIVE / USER-APPROVED</span><span id="memory-count" class="micro">0 ENTRIES</span></div>
-          <form id="memory-form" class="memoryform"><label class="visuallyhidden" for="memory-input">Fact to save</label><input id="memory-input" maxlength="1000" placeholder="Fact to remember (saved only when you click Save)"><button class="ghost" type="submit">Save</button></form>
-          <ul id="memory-list" class="memorylist" aria-label="Saved facts"></ul>
+          <form id="memory-form" class="memory-editor">
+            <label for="memory-kind">Memory category (user-supplied, not independently verified)</label>
+            <select id="memory-kind" name="kind">
+              <option value="note">Note</option>
+              <option value="preference">Preference</option>
+              <option value="decision">Decision</option>
+              <option value="episode">Episode</option>
+              <option value="procedure">Procedure (not execution approval)</option>
+              <option value="hypothesis">Hypothesis (not a verified finding)</option>
+              <option value="fiction">Fiction / canon (excluded from chat memory)</option>
+            </select>
+            <label class="visuallyhidden" for="memory-source">Optional source reference</label>
+            <input id="memory-source" maxlength="240" placeholder="Optional source reference (stored as text, not fetched)">
+            <div class="memoryform">
+              <label class="visuallyhidden" for="memory-input">Memory to save</label>
+              <input id="memory-input" maxlength="1000" placeholder="Save only what you approve for local retention" required>
+              <button id="memory-save" class="ghost" type="submit">Save</button>
+            </div>
+            <p id="memory-edit-status" class="notice" role="status"></p>
+            <button id="memory-cancel" class="ghost" type="button" hidden>Cancel edit</button>
+          </form>
+          <p class="notice">Save approves local retention. Notes are not encrypted. Fiction stays out of normal chat context. Existing legacy notes have no recorded consent timestamp.</p>
+          <ul id="memory-list" class="memorylist" aria-label="Saved memories"></ul>
+          <div class="memory-navigation">
+            <button id="memory-newest" class="ghost" type="button">Newest memories</button>
+            <button id="memory-older" class="ghost" type="button" disabled>Older memories</button>
+          </div>
+          <button id="memory-export" class="ghost" type="button">Export all memories</button>
+          <p id="memory-export-status" class="notice" role="status">JSON exports include every category, including fiction. Downloads are unencrypted and are not restorable backups; use the local SQLite snapshot command for recovery.</p>
         </div>
       </section>
     </main>
