@@ -164,6 +164,34 @@ tests cover malformed output, provider failure, byte boundaries, syntax/no-op
 rejection, stale source, concurrent requests, and separate apply/rollback. This
 does not prove live-model quality, provide a sandbox, or implement multi-file tasks.
 
+## Bounded multi-file preview
+
+`ProjectValidation.propose_many` accepts 1-5 `{path, content}` objects, with 48 KiB
+aggregate supplied UTF-8 content. It checks all supported syntax before invoking
+`ProjectChanges.propose_many`. `_prepare` is shared with the single-file path and
+constructs bounded diffs without registration or writes. Duplicate resolved targets
+are rejected. `_stage` takes the existing proposal lock, checks capacity and every
+baseline, writes staging metadata, then registers the complete list. Invalid sets,
+conflicts, capacity errors or audit failures leave no newly actionable subset;
+attempted-stage audit metadata can remain if a later audit append fails.
+
+`POST /api/project/change-set` returns `changes` (proposal/validation pairs),
+`atomic_apply: false`, and `tests_executed: false`. Existing single-file endpoints
+and proposal response shapes remain compatible. `GET /api/project/proposals/<id>`
+returns current pending/applied/rolled_back state, 404 for missing/expired proposals,
+or 503 for state-storage failure. Host checks apply to reads and writes; writes
+retain Origin checks. Proposal IDs are process-local and are not authenticated
+authorization.
+
+The UI renders separate source diffs using text nodes and requires per-file Apply
+or Rollback confirmation. Failures mark a card unverified and block further mutation
+until refresh; successful files remain visibly applied when another file fails.
+Refresh reports recorded state without rechecking on-disk hashes. Files are not
+applied atomically and no automatic rollback-on-error is attempted. Browser reload
+loses the set view; restart/expiry loses proposal bytes. This is operator-authored
+multi-file preview/review, not multi-file model generation or a durable engineering
+task scheduler. It executes no project code.
+
 ## Operational invariants
 
 - The AI model is not a source of truth about hardware state. Telemetry must come from authenticated sensors.

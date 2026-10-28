@@ -17,6 +17,8 @@ from .repository import SENSITIVE_NAME_PARTS, SUPPORTED_SUFFIXES, SPECIAL_FILES
 
 MAX_CHANGE_BYTES = 24 * 1024
 MAX_PENDING_PROPOSALS = 20
+MAX_CHANGE_SET_FILES = 5
+MAX_CHANGE_SET_BYTES = 48 * 1024
 MAX_AUDIT_EVENTS = 100
 PROPOSAL_LIFETIME = timedelta(minutes=15)
 
@@ -71,6 +73,39 @@ class ProjectChanges:
         }
 
     def propose(self, relative_path: str, content: str, *, expected_sha256=None) -> dict:
+        proposal = self._prepare(relative_path, content, expected_sha256=expected_sha256)
+        return self._stage([proposal])[0]
+
+    @staticmethod
+    def validate_change_set(entries):
+        if not isinstance(entries, list) or not 1 <= len(entries) <= MAX_CHANGE_SET_FILES:
+            raise ValueError(f"A change set must contain 1-{MAX_CHANGE_SET_FILES} files")
+        size = 0
+        for entry in entries:
+            if not isinstance(entry, dict) or set(entry) != {"path", "content"}:
+                raise ValueError("Each change-set entry must contain exactly path and content")
+            if not isinstance(entry["path"], str) or not isinstance(entry["content"], str):
+                raise ValueError("Change-set paths and contents must be text")
+            try:
+                size += len(entry["content"].encode("utf-8"))
+            except UnicodeEncodeError as exc:
+                raise ValueError("Change-set content must contain valid Unicode") from exc
+        if size > MAX_CHANGE_SET_BYTES:
+            raise ValueError(f"Change-set contents exceed {MAX_CHANGE_SET_BYTES} UTF-8 bytes")
+
+    def propose_many(self, entries) -> list[dict]:
+        self.validate_change_set(entries)
+        proposals = [self._prepare(entry["path"], entry["content"]) for entry in entries]
+        if len({proposal.target for proposal in proposals}) != len(proposals):
+            raise ValueError("A change set cannot contain duplicate target files")
+        return self._stage(proposals)
+
+    def describe(self, proposal_id: str) -> dict:
+        with self._lock:
+            proposal = self._get_proposal(proposal_id)
+            return self._describe(proposal_id, proposal)
+
+    def _prepare(self, relative_path: str, content: str, *, expected_sha256=None) -> Proposal:
         target, display_path = self._resolve_target(relative_path)
         if not isinstance(content, str):
             raise ValueError("Proposed file content must be text")
@@ -111,14 +146,21 @@ class ProjectChanges:
             diff=diff,
             created_at=datetime.now(timezone.utc),
         )
+        return proposal
+
+    def _stage(self, proposals: list[Proposal]) -> list[dict]:
         with self._lock:
             self._expire_proposals()
-            if len(self._proposals) >= MAX_PENDING_PROPOSALS:
+            if len(self._proposals) + len(proposals) > MAX_PENDING_PROPOSALS:
                 raise ValueError("Too many pending project changes; restart ASTRA to clear them")
-            proposal_id = secrets.token_urlsafe(24)
-            self._proposals[proposal_id] = proposal
-            self._record_event("staged", proposal_id, proposal)
-        return self._describe(proposal_id, proposal)
+            for proposal in proposals:
+                self._assert_unchanged(proposal, proposal.original_hash)
+            staged = [(secrets.token_urlsafe(24), proposal) for proposal in proposals]
+            # Audit failure must not leave actionable, unreported proposals in memory.
+            for proposal_id, proposal in staged:
+                self._record_event("staged", proposal_id, proposal)
+            self._proposals.update(staged)
+            return [self._describe(proposal_id, proposal) for proposal_id, proposal in staged]
 
     def apply(self, proposal_id: str, confirmed=False) -> dict:
         if confirmed is not True:
@@ -230,12 +272,12 @@ class ProjectChanges:
             if temporary_path.exists():
                 temporary_path.unlink()
 
-    def _get_proposal(self, proposal_id: str, expected_state: str) -> Proposal:
+    def _get_proposal(self, proposal_id: str, expected_state: str | None = None) -> Proposal:
         self._expire_proposals()
         if not isinstance(proposal_id, str) or proposal_id not in self._proposals:
             raise ValueError("Project change proposal was not found or has expired")
         proposal = self._proposals[proposal_id]
-        if proposal.state != expected_state:
+        if expected_state is not None and proposal.state != expected_state:
             raise ValueError(f"Project change is already {proposal.state.replace('_', ' ')}")
         return proposal
 

@@ -158,6 +158,20 @@ def make_handler(core: AstraCore):
                     self._send(200, core.repository.changes.audit_log())
                 except OSError as exc:
                     self._send(500, {"error": f"Project audit log unavailable: {exc.strerror or str(exc)}"})
+            elif url.path.startswith("/api/project/proposals/"):
+                if core.repository is None:
+                    self._send(404, {"error": "Project context is not enabled"})
+                    return
+                parts = url.path.strip("/").split("/")
+                if len(parts) != 4:
+                    self._send(404, {"error": "Not found"})
+                    return
+                try:
+                    self._send(200, {"proposal": core.repository.changes.describe(parts[3])})
+                except ValueError as exc:
+                    self._send(404, {"error": str(exc)})
+                except (OSError, sqlite3.Error):
+                    self._send(503, {"error": "Project proposal state unavailable"})
             else:
                 self._send(404, {"error": "Not found"})
 
@@ -205,6 +219,11 @@ def make_handler(core: AstraCore):
                         body.get("path"), body.get("instruction"), confirmed=body.get("confirm") is True,
                     )
                     self._send(201, result)
+                elif path == "/api/project/change-set":
+                    if core.repository is None:
+                        self._send(404, {"error": "Project context is not enabled"})
+                        return
+                    self._send(201, core.repository.validation.propose_many(body.get("files")))
                 elif path == "/api/project/proposals":
                     if core.repository is None:
                         self._send(404, {"error": "Read-only project context is not enabled"})

@@ -231,6 +231,42 @@ Automated tests use explicitly controlled provider replies to verify the workflo
 not to establish code-generation quality. Invalid model output must be retried
 explicitly. Commands, project tests and builds remain disabled.
 
+### Multi-file review sets
+
+The Project Inspector's **Multi-file review set** accepts a JSON array containing
+1-5 existing files with their complete replacements:
+
+```json
+[
+  {"path": "src/example.py", "content": "value = 2\n"},
+  {"path": "config.json", "content": "{\"value\":2}\n"}
+]
+```
+
+These are **operator-supplied replacements**, not multi-file model generation.
+ASTRA checks the entire request's shape and bounds, validates supported syntax,
+prepares every diff, rejects duplicate targets and changed baselines, then registers
+the proposals together. A failed preview leaves no actionable subset staged and
+never writes project files. Total supplied content is limited to 48 KiB UTF-8;
+individual files/replacements retain the 24-KiB limit. The HTTP request—including
+JSON escape overhead—must also fit the existing 64-KiB body limit.
+
+Each card has its own confirmed **Apply this file** and **Rollback this file**
+action. **Apply is not atomic across the set.** If the second file conflicts or
+fails, the first can remain applied; its card and rollback remain available. No
+automatic compensation overwrites another file. After a lost/error response,
+actions on that card are disabled until **Refresh set states** retrieves the
+server's proposal state. Refresh does not revalidate current file hashes, run tests,
+or prove filesystem correctness; inspect actual files if an outcome is uncertain.
+The existing hash guards run on each Apply/Rollback.
+
+The set view is browser-memory-only. Proposals and rollback snapshots expire after
+15 minutes or process restart; reloading the page loses the visible set. Replacing
+the visible set does not undo applied changes or discard pending server proposals.
+Keep necessary proposal IDs and review the existing change history before leaving.
+There is no multi-file transactional filesystem commit, crash recovery, automatic
+retry, new-file creation, dependency ordering, or test/build execution.
+
 ### Local inference boundary
 
 CORE consumes the typed `InferenceProvider` contract in `astra/inference.py`: adapter identity, selected model, health, and role-tagged chat messages. The shared `ModelError` represents failed inference, not an answer. Ollama remains the only production adapter; this contract does not install models, route tasks, or add llama.cpp/vLLM support.

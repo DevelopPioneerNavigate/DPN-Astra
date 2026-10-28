@@ -10,3 +10,5 @@
 .memory-navigation,.memory-actions{display:flex;gap:8px;flex-wrap:wrap}
 .memory-editor [hidden]{display:none}
 #memory-scope{width:100%;margin-top:8px;padding:8px;background:#0d0a14;color:var(--white);border:1px solid var(--line);font:inherit}
+.change-set{border-top:1px solid var(--line);margin-top:16px;padding-top:12px}
+.change-set-file{border:1px solid var(--line);margin-top:10px;padding:10px}

@@ -172,6 +172,25 @@ class ProjectValidation:
         proposal = self.changes.propose(relative_path, content, expected_sha256=expected_sha256)
         return {"proposal": proposal, "validation": validation}
 
+    def propose_many(self, entries) -> dict:
+        self.changes.validate_change_set(entries)
+        validations = []
+        for entry in entries:
+            suffix = Path(entry["path"]).suffix.lower()
+            result = self.validate(entry["path"], entry["content"]) if suffix in VALIDATORS else None
+            if result is not None and not result["valid"]:
+                raise ProjectSyntaxError(result)
+            validations.append(result)
+        proposals = self.changes.propose_many(entries)
+        return {
+            "changes": [
+                {"proposal": proposal, "validation": validation}
+                for proposal, validation in zip(proposals, validations)
+            ],
+            "atomic_apply": False,
+            "tests_executed": False,
+        }
+
     @staticmethod
     def _reject_nonstandard_json(value):
         raise ValueError(f"Non-standard JSON constant {value!r}")

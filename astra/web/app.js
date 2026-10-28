@@ -813,6 +813,126 @@
     }
   });
 
+  let reviewSet = [];
+  let reviewSetBusy = false;
+
+  function renderReviewSet() {
+    const results = $("project-set-results");
+    results.replaceChildren();
+    const counts = {};
+    for (const entry of reviewSet) {
+      const state = entry.uncertain ? "unverified" : entry.proposal.state;
+      counts[state] = (counts[state] || 0) + 1;
+      const section = document.createElement("section");
+      section.className = "change-set-file";
+      const heading = document.createElement("h4");
+      heading.textContent = entry.proposal.path + " / " + state;
+      const diagnostic = document.createElement("p");
+      diagnostic.className = "notice";
+      diagnostic.textContent = (entry.validation
+        ? entry.validation.language + " syntax passed at preview. "
+        : "No static syntax validator for this file type. ")
+        + (entry.error || "No tests executed.");
+      const diff = document.createElement("pre");
+      diff.className = "change-diff";
+      diff.textContent = entry.proposal.diff;
+      const actions = document.createElement("div");
+      actions.className = "memory-actions";
+      if (!entry.uncertain && ["pending", "applied"].includes(entry.proposal.state)) {
+        const action = entry.proposal.state === "pending" ? "apply" : "rollback";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "ghost";
+        button.textContent = action === "apply" ? "Apply this file" : "Rollback this file";
+        button.setAttribute("aria-label", (action === "apply" ? "Apply " : "Rollback ") + entry.proposal.path);
+        button.disabled = reviewSetBusy;
+        button.addEventListener("click", () => mutateReviewSet(entry, action));
+        actions.append(button);
+      }
+      section.append(heading, diagnostic, diff, actions);
+      results.append(section);
+    }
+    if (reviewSet.length) {
+      $("project-set-status").textContent = "Review set: " + Object.entries(counts)
+        .map(([state, count]) => count + " " + state).join(", ")
+        + ". Each file is independent; partial application is possible. Refresh verifies proposal state, not runtime correctness or current file hashes.";
+    }
+  }
+
+  function lockReviewSet(locked) {
+    reviewSetBusy = locked;
+    $("project-set-input").disabled = locked;
+    $("project-set-preview").disabled = locked;
+    $("project-set-refresh").disabled = locked;
+    renderReviewSet();
+  }
+
+  async function mutateReviewSet(entry, action) {
+    if (reviewSetBusy) return;
+    if (!confirm((action === "apply" ? "Apply the reviewed change to " : "Restore the reviewed original of ")
+      + entry.proposal.path + " only?\n\nOther files will not be changed. No commands run.")) return;
+    lockReviewSet(true);
+    try {
+      const response = await api("/api/project/proposals/" + encodeURIComponent(entry.proposal.id) + "/" + action, {
+        method: "POST", body: JSON.stringify({ confirm: true })
+      });
+      entry.proposal = response.proposal;
+      entry.error = "";
+      entry.uncertain = false;
+      refreshProjectHistory();
+    } catch (error) {
+      entry.error = action + " failed or its response was lost: " + error.message
+        + ". Refresh states before retrying; inspect the file if the outcome is uncertain.";
+      entry.uncertain = true;
+    } finally { lockReviewSet(false); }
+  }
+
+  $("project-set-preview").addEventListener("click", async () => {
+    if (reviewSetBusy) return;
+    if (reviewSet.length && !confirm("Replace the visible review set? Existing proposals remain until expiry; applied changes are NOT undone. Keep any rollback IDs you need.")) return;
+    lockReviewSet(true);
+    try {
+      let files;
+      try { files = JSON.parse($("project-set-input").value); }
+      catch { throw new Error("Replacement files must be a valid JSON array"); }
+      const response = await api("/api/project/change-set", {
+        method: "POST", body: JSON.stringify({ files })
+      });
+      reviewSet = response.changes.map(entry => ({ ...entry, uncertain: false, error: "" }));
+      renderReviewSet();
+      refreshProjectHistory();
+    } catch (error) {
+      $("project-set-status").textContent = "Review-set preview failed: " + error.message
+        + ". No file writes were requested. The previous visible set is retained.";
+    } finally {
+      reviewSetBusy = false;
+      $("project-set-input").disabled = false;
+      $("project-set-preview").disabled = false;
+      $("project-set-refresh").disabled = false;
+      // Re-enable existing cards without hiding preview failures in the summary.
+      for (const button of $("project-set-results").querySelectorAll("button")) button.disabled = false;
+    }
+  });
+
+  $("project-set-refresh").addEventListener("click", async () => {
+    if (reviewSetBusy || !reviewSet.length) return;
+    lockReviewSet(true);
+    try {
+      for (const entry of reviewSet) {
+        try {
+          const response = await api("/api/project/proposals/" + encodeURIComponent(entry.proposal.id));
+          entry.proposal = response.proposal;
+          entry.uncertain = false;
+          entry.error = "";
+        } catch (error) {
+          entry.uncertain = true;
+          entry.error = "State unavailable (possibly expired or restarted): " + error.message
+            + ". Inspect the actual file; no operation was retried.";
+        }
+      }
+    } finally { lockReviewSet(false); }
+  });
+
   $("speech").addEventListener("click", () => {
     if (!("speechSynthesis" in window)) { notice.textContent = "Speech output is unsupported by this browser."; return; }
     speaking = !speaking;

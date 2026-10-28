@@ -81,6 +81,24 @@ incorrect code, not just syntax validity. There is one concurrent draft allowanc
 per HTTP service, but no production isolation or total inference deadline. There
 is no automatic retry, test execution, dependency installation or shell access.
 
+## Multi-file review sets
+
+The change-set endpoint accepts at most five existing eligible files and 48 KiB
+of supplied UTF-8 content, within the existing 64-KiB HTTP body bound. It grants no
+new path, creation, execution or remote-access capability. All syntax/size/path
+checks and baseline checks pass before actionable proposals are registered. Audit
+failure during staging can leave attempted-stage metadata, but does not publish an
+actionable subset. The audit ledger remains unauthenticated.
+
+Apply/Rollback stays individually confirmed per file; there is no "Apply all"
+transaction. Partial application and rollback conflicts are possible and explicitly
+displayed. An error/lost response marks the UI state unverified until state refresh.
+State refresh reports process-local proposal state, not independent disk/hash
+verification. A concurrent local writer can still race filesystem operations;
+this is not isolation from hostile processes. No crash-safe multi-file journal or
+automatic compensation is implemented. Refresh after expiry/restart cannot recover
+lost rollback bytes. Back up important projects independently.
+
 ## Required before DPN integration
 - Per-user local authentication and privileged action re-verification.
 - Asset allowlists, role-based controls and explicit human confirmation.

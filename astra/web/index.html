@@ -105,6 +105,16 @@
             </div>
             <p id="project-history-status" class="notice">Change history is temporary and clears when ASTRA exits.</p>
             <ul id="project-change-history" class="memorylist" aria-live="polite"></ul>
+            <section class="change-set">
+              <h3>Multi-file review set</h3>
+              <p class="notice">Submit 1-5 existing files as a JSON array of {"path":"sample.py","content":"complete replacement"}. Maximum 48 KiB total UTF-8 content; each file stays within 24 KiB. Preview never writes files. Each Apply is independent: a partially applied set is not atomic.</p>
+              <label for="project-set-input">Replacement files (JSON array)</label>
+              <textarea id="project-set-input" maxlength="60000" rows="8" spellcheck="false" placeholder='[{"path":"src/core.py","content":"complete replacement\n"},{"path":"tests/test_core.py","content":"complete replacement\n"}]'></textarea>
+              <button id="project-set-preview" class="ghost" type="button">Preview multi-file set</button>
+              <button id="project-set-refresh" class="ghost" type="button">Refresh set states</button>
+              <p id="project-set-status" class="notice" role="status">No review set loaded. Rollback snapshots expire after 15 minutes or process restart. No tests or commands run.</p>
+              <div id="project-set-results" aria-label="Per-file review set"></div>
+            </section>
           </section>
         </details>
         <div class="composer">
