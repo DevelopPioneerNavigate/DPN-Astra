@@ -220,9 +220,36 @@ or Rollback confirmation. Failures mark a card unverified and block further muta
 until refresh; successful files remain visibly applied when another file fails.
 Refresh reports recorded state without rechecking on-disk hashes. Files are not
 applied atomically and no automatic rollback-on-error is attempted. Browser reload
-loses the set view; restart/expiry loses proposal bytes. Sets may be operator-authored
+loses the set view until retained reviews are recovered; restart/expiry loses proposal bytes. Sets may be operator-authored
 or generated through the bounded draft-set service above. This is not a durable
 engineering task scheduler. It executes no project code.
+
+## Review continuity and metadata checkpoints
+
+Project audit schema v2 adds `project_review_checkpoints`, keyed by normalized
+resolved project-root hash and proposal ID, with latest event sequence, timestamp,
+path, state and original/proposed content hashes. Each scoped lifecycle append
+updates the audit event and checkpoint in the same SQLite transaction. Migration
+uses `BEGIN IMMEDIATE`, preserves schema-v1 events and hashes, and rolls back on
+failure. Legacy events cannot be attributed to a project and are not backfilled.
+Unscoped direct audit clients retain event logging without creating scoped rows.
+
+`ProjectChanges.review_checkpoints` expires proposals under the existing lock,
+reads up to 100 newest scoped records with count/truncation from one transaction,
+and returns every still-retained process-local proposal separately. A historical
+record's `recoverable` means the matching in-memory proposal exists, not that disk
+hashes were checked. Attempted staging metadata is not used to reconstruct state.
+`GET /api/project/checkpoints` returns 404 without context and 503 on storage errors;
+it never invokes inference or writes project files.
+
+The UI recovery control restores live diffs/actions after browser reload, labels
+validation as not rechecked, and shows historical metadata without action buttons.
+It preserves the previous visible reviews on fetch failure. Restart/expiry cannot
+recover source, diffs, rollback bytes, instructions, original grouping or validation
+results. Records are plaintext and unauthenticated; event-chain verification does
+not cover the materialized checkpoint index. Audit failure after a write can leave
+recorded state behind disk state. Recovery is not a disk correctness claim, task
+scheduler, durable execution journal or authorization restoration.
 
 ## Operational invariants
 

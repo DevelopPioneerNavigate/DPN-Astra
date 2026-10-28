@@ -108,7 +108,25 @@ this is not isolation from hostile processes. No crash-safe multi-file journal o
 automatic compensation is implemented. Refresh after expiry/restart cannot recover
 lost rollback bytes. Back up important projects independently.
 
+## Review checkpoints
+
+Review recovery uses `GET /api/project/checkpoints` under the existing Host check.
+It exposes only the configured project's checkpoint rows and process-local reviews.
+Checkpoint rows are a plaintext, unauthenticated latest-event index in the project
+audit database; the existing event-chain verification does not authenticate or
+verify that separate index. Tampered/stale metadata never grants mutation authority.
+Only original process-local proposals can be recovered into Apply/Rollback controls,
+and those operations retain confirmation, path and hash guards. Metadata after
+restart/expiry is explicitly non-actionable. Original set grouping and validation
+results are not persisted; recovering a review does not revalidate syntax or disk
+state. The checkpoint table contains no source/replacement/diff/instruction bytes.
+An audit failure can leave attempted-stage metadata without an actionable proposal;
+an audit failure after a write can leave recorded state behind actual disk state.
+Inspect files whenever outcomes are uncertain. There is no automatic reconciliation,
+retention, encrypted source recovery or crash-safe task journal.
+
 ## Required before DPN integration
+
 - Per-user local authentication and privileged action re-verification.
 - Asset allowlists, role-based controls and explicit human confirmation.
 - Separate safety systems for physical machinery and doors.

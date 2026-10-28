@@ -8,12 +8,13 @@ import sqlite3
 
 
 ZERO_HASH = "0" * 64
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class ProjectAuditLog:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, project_key: str = ""):
         self.path = Path(path)
+        self.project_key = project_key
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
         if os.name != "nt":
@@ -27,8 +28,9 @@ class ProjectAuditLog:
     def _initialize(self):
         db = self._connect()
         try:
+            db.execute("BEGIN IMMEDIATE")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, SCHEMA_VERSION):
+            if version not in (0, 1, SCHEMA_VERSION):
                 raise RuntimeError(f"Unsupported project audit schema version: {version}")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS project_change_events (
@@ -44,8 +46,29 @@ class ProjectAuditLog:
                     event_hash TEXT NOT NULL
                 )"""
             )
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS project_review_checkpoints (
+                    project_key TEXT NOT NULL,
+                    proposal_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    event TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    original_sha256 TEXT NOT NULL,
+                    proposed_sha256 TEXT NOT NULL,
+                    PRIMARY KEY (project_key, proposal_id)
+                )"""
+            )
+            db.execute(
+                """CREATE INDEX IF NOT EXISTS project_review_checkpoint_order
+                   ON project_review_checkpoints (project_key, sequence DESC)"""
+            )
             db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 
@@ -85,6 +108,23 @@ class ProjectAuditLog:
                     previous_hash, event_hash,
                 ),
             )
+            if self.project_key:
+                db.execute(
+                    """INSERT INTO project_review_checkpoints
+                       (project_key, proposal_id, sequence, timestamp, event, path,
+                        state, original_sha256, proposed_sha256)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(project_key, proposal_id) DO UPDATE SET
+                           sequence=excluded.sequence, timestamp=excluded.timestamp,
+                           event=excluded.event, path=excluded.path, state=excluded.state,
+                           original_sha256=excluded.original_sha256,
+                           proposed_sha256=excluded.proposed_sha256""",
+                    (
+                        self.project_key, proposal_id, sequence, record["timestamp"],
+                        event, proposal.path, proposal.state, proposal.original_hash,
+                        proposal.replacement_hash,
+                    ),
+                )
             db.commit()
         except Exception:
             db.rollback()
@@ -106,6 +146,27 @@ class ProjectAuditLog:
             total = db.execute("SELECT COUNT(*) FROM project_change_events").fetchone()[0]
             events = [dict(row) for row in reversed(rows)]
             return {"events": events, "total": total}
+        finally:
+            db.close()
+
+    def checkpoints(self, limit=100):
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("Checkpoint limit must be between 1 and 100")
+        db = self._connect()
+        try:
+            db.execute("BEGIN")
+            rows = db.execute(
+                """SELECT proposal_id, sequence, timestamp, event, path, state,
+                          original_sha256, proposed_sha256
+                   FROM project_review_checkpoints WHERE project_key = ?
+                   ORDER BY sequence DESC LIMIT ?""",
+                (self.project_key, limit),
+            ).fetchall()
+            total = db.execute(
+                "SELECT COUNT(*) FROM project_review_checkpoints WHERE project_key = ?",
+                (self.project_key,),
+            ).fetchone()[0]
+            return {"checkpoints": [dict(row) for row in rows], "total": total, "truncated": total > len(rows)}
         finally:
             db.close()
 

@@ -56,7 +56,9 @@ class ProjectChanges:
         self.permissions.require_read()
         self._proposals: dict[str, Proposal] = {}
         self._audit_events: list[dict] = []
-        self._audit_log = ProjectAuditLog(audit_path) if audit_path is not None else None
+        self._audit_log = ProjectAuditLog(
+            audit_path, project_key=self._hash(os.fsencode(os.path.normcase(str(self.root)))),
+        ) if audit_path is not None else None
         self._lock = RLock()
 
     def read_file(self, relative_path: str) -> dict:
@@ -208,6 +210,26 @@ class ProjectChanges:
             result["durable"] = self._audit_log.durable
             result["integrity"] = self._audit_log.verify()
             return result
+
+    def review_checkpoints(self) -> dict:
+        with self._lock:
+            self._expire_proposals()
+            history = self._audit_log.checkpoints() if self._audit_log is not None else {
+                "checkpoints": [], "total": 0, "truncated": False,
+            }
+            for record in history["checkpoints"]:
+                record["recoverable"] = record["proposal_id"] in self._proposals
+            return {
+                **history,
+                "durable": self._audit_log is not None,
+                "changes": [
+                    {"proposal": self._describe(proposal_id, proposal), "validation": None,
+                     "recovered": True}
+                    for proposal_id, proposal in self._proposals.items()
+                ],
+                "tests_executed": False,
+                "atomic_apply": False,
+            }
 
     def _resolve_target(self, relative_path: str):
         if not isinstance(relative_path, str) or not relative_path or len(relative_path) > 240:

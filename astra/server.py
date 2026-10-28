@@ -158,6 +158,14 @@ def make_handler(core: AstraCore):
                     self._send(200, core.repository.changes.audit_log())
                 except OSError as exc:
                     self._send(500, {"error": f"Project audit log unavailable: {exc.strerror or str(exc)}"})
+            elif url.path == "/api/project/checkpoints":
+                if core.repository is None:
+                    self._send(404, {"error": "Project context is not enabled"})
+                    return
+                try:
+                    self._send(200, core.repository.changes.review_checkpoints())
+                except (OSError, sqlite3.Error):
+                    self._send(503, {"error": "Project review checkpoints unavailable"})
             elif url.path.startswith("/api/project/proposals/"):
                 if core.repository is None:
                     self._send(404, {"error": "Project context is not enabled"})

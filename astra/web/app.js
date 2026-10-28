@@ -829,7 +829,9 @@
       heading.textContent = entry.proposal.path + " / " + state;
       const diagnostic = document.createElement("p");
       diagnostic.className = "notice";
-      diagnostic.textContent = (entry.validation
+      diagnostic.textContent = entry.recovered
+        ? "Recovered process-local review. Syntax has not been rechecked; no tests executed. " + (entry.error || "")
+        : (entry.validation
         ? entry.validation.language + " syntax passed at preview. "
         : "No static syntax validator for this file type. ")
         + (entry.error || "No tests executed.");
@@ -856,6 +858,8 @@
       $("project-set-status").textContent = "Review set: " + Object.entries(counts)
         .map(([state, count]) => count + " " + state).join(", ")
         + ". Each file is independent; partial application is possible. Refresh verifies proposal state, not runtime correctness or current file hashes.";
+    } else {
+      $("project-set-status").textContent = "No retained review set loaded. Historical metadata cannot restore expired or restarted proposals. No tests or commands run.";
     }
   }
 
@@ -867,6 +871,7 @@
     $("project-set-paths").disabled = locked;
     $("project-set-instruction").disabled = locked;
     $("project-set-draft").disabled = locked;
+    $("project-set-recover").disabled = locked;
     renderReviewSet();
   }
 
@@ -965,6 +970,33 @@
             + ". Inspect the actual file; no operation was retried.";
         }
       }
+    } finally { lockReviewSet(false); }
+  });
+
+  $("project-set-recover").addEventListener("click", async () => {
+    if (reviewSetBusy) return;
+    if (reviewSet.length && !confirm("Replace the visible review with all retained proposals? No files will be changed. Original set grouping is not retained.")) return;
+    lockReviewSet(true);
+    try {
+      const response = await api("/api/project/checkpoints");
+      reviewSet = response.changes.map(entry => ({ ...entry, uncertain: false, error: "" }));
+      const records = $("project-checkpoints");
+      records.replaceChildren();
+      for (const record of response.checkpoints) {
+        const item = document.createElement("li");
+        item.textContent = record.timestamp + " / " + record.path + " / recorded "
+          + record.event + " (" + record.state + ") / "
+          + (record.recoverable ? "review retained in current process" : "metadata only; re-inspect and create a fresh proposal")
+          + " / " + record.proposal_id;
+        records.append(item);
+      }
+      $("project-checkpoint-status").textContent = (response.durable ? "Persistent" : "Process-only")
+        + " review checkpoints: " + response.total + " recorded; " + response.changes.length
+        + " retained reviews recovered. " + (response.truncated ? "Showing latest 100 records. " : "")
+        + "Recorded state is not disk verification. Historical metadata never restores write authorization or rollback bytes.";
+    } catch (error) {
+      $("project-checkpoint-status").textContent = "Could not recover review checkpoints: " + error.message
+        + ". No file operation was attempted; previous visible reviews retained.";
     } finally { lockReviewSet(false); }
   });
 

@@ -118,6 +118,9 @@
               <textarea id="project-set-input" maxlength="60000" rows="8" spellcheck="false" placeholder='[{"path":"src/core.py","content":"complete replacement\n"},{"path":"tests/test_core.py","content":"complete replacement\n"}]'></textarea>
               <button id="project-set-preview" class="ghost" type="button">Preview multi-file set</button>
               <button id="project-set-refresh" class="ghost" type="button">Refresh set states</button>
+              <button id="project-set-recover" class="ghost" type="button">Recover reviews / show checkpoints</button>
+              <p id="project-checkpoint-status" class="notice" role="status">Checkpoint metadata can survive restart when project audit storage is configured. Source, diffs and rollback bytes do not.</p>
+              <ul id="project-checkpoints" class="memorylist" aria-label="Recorded review checkpoints"></ul>
               <p id="project-set-status" class="notice" role="status">No review set loaded. Rollback snapshots expire after 15 minutes or process restart. No tests or commands run.</p>
               <div id="project-set-results" aria-label="Per-file review set"></div>
             </section>

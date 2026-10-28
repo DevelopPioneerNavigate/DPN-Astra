@@ -282,11 +282,38 @@ or prove filesystem correctness; inspect actual files if an outcome is uncertain
 The existing hash guards run on each Apply/Rollback.
 
 The set view is browser-memory-only. Proposals and rollback snapshots expire after
-15 minutes or process restart; reloading the page loses the visible set. Replacing
+15 minutes or process restart; after a page reload, use the recovery control below
+to retrieve still-retained reviews (without their original grouping). Replacing
 the visible set does not undo applied changes or discard pending server proposals.
 Keep necessary proposal IDs and review the existing change history before leaving.
 There is no multi-file transactional filesystem commit, crash recovery, automatic
 retry, new-file creation, dependency ordering, or test/build execution.
+
+### Review checkpoints and reload recovery
+
+Choose **Recover reviews / show checkpoints** to retrieve all retained proposals
+for the current project into the per-file review controls. This recovers diffs
+after a browser reload while the same ASTRA process and proposal lifetime remain
+active. Each mutation still needs confirmation and existing hash checks. Recovery
+does not rerun syntax checks, execute tests, verify current disk contents, or
+preserve the original set grouping. It replaces the visible review only after a
+successful request.
+
+With normal project audit storage configured, lifecycle metadata also survives
+ASTRA restart: proposal ID, path, last recorded event/state, timestamps and content
+hashes. These records are isolated by normalized resolved project-root identity.
+**No source, replacement content, diff, instruction or rollback bytes is persisted
+by this feature.** After restart or expiry, records are metadata only: inspect
+the current files and create fresh proposals. Recovery never reconstructs an
+actionable proposal from historical metadata or performs an automatic write.
+
+Audit schema v2 adds a project-scoped checkpoint table transactionally, preserving
+the existing event/hash chain. Legacy events lack project identity and are not
+guessed into a project checkpoint; they remain available in Change History.
+The checkpoint display returns at most the latest 100 records plus all currently
+retained reviews. Metadata has no automatic retention policy, encryption or
+authentication. It is not crash-safe task execution recovery or a source backup.
+The separate memory snapshot command does not back up this audit database.
 
 ### Local inference boundary
 
