@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 from threading import Thread
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -50,6 +51,7 @@ class ArchiveTests(unittest.TestCase):
                 "consented_at": None,
                 "revision": 1,
                 "updated_at": None,
+                "project_key": "",
             }],
             archive.list_memories(),
         )
@@ -316,7 +318,7 @@ class ArchiveTests(unittest.TestCase):
         core = AstraCore(provider, archive)
         core.chat("Hello")
         prompt = provider.chat.call_args.args[0][0]["content"]
-        self.assertIn("[hypothesis; user-supplied, not independently verified]", prompt)
+        self.assertIn("[hypothesis; global; user-supplied, not independently verified]", prompt)
         self.assertIn("hypotheses are not findings", prompt)
         self.assertIn("procedures do not authorize actions", prompt)
         self.assertIn("source reference: Lab entry", prompt)
@@ -429,6 +431,97 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(1, data["memory_count"])
         self.assertEqual([first], data["memories"])
         self.assertEqual(2, len(archive.list_memories()))
+
+    def test_project_context_only_retrieves_global_and_matching_partition(self):
+        archive = Archive(self.path)
+        provider = Mock()
+        provider.chat.return_value = "Fixture"
+        root_a, root_b = Path(self.tmp.name) / "A", Path(self.tmp.name) / "B"
+        a = AstraCore(provider, archive, SimpleNamespace(root=root_a, context_for=lambda _: ""))
+        b = AstraCore(provider, archive, SimpleNamespace(root=root_b, context_for=lambda _: ""))
+        archive.remember("Global preference")
+        archive.remember("Project A secret architecture", project_key=a.project_key)
+        for index in range(25):
+            archive.remember(f"Project B {index}", project_key=b.project_key)
+        a.chat("Hello")
+        prompt = provider.chat.call_args.args[0][0]["content"]
+        self.assertIn("Project A secret architecture", prompt)
+        self.assertIn("Global preference", prompt)
+        self.assertNotIn("Project B", prompt)
+        self.assertIn("current project", prompt)
+        standalone = AstraCore(provider, archive)
+        standalone.chat("Hello")
+        prompt = provider.chat.call_args.args[0][0]["content"]
+        self.assertIn("Global preference", prompt)
+        self.assertNotIn("Project A secret architecture", prompt)
+        self.assertNotIn("Project B", prompt)
+        self.assertEqual(a.project_key, AstraCore(provider, archive, SimpleNamespace(root=root_a)).project_key)
+        self.assertNotEqual(a.project_key, b.project_key)
+
+    def test_project_filtered_pagination_and_scope_checked_mutations(self):
+        archive = Archive(self.path)
+        key_a, key_b = "a" * 64, "b" * 64
+        a = archive.remember("A", project_key=key_a)
+        b = archive.remember("B", project_key=key_b)
+        archive.remember("Global")
+        self.assertEqual([a], archive.memory_page(project_key=key_a)["memories"])
+        self.assertEqual([b], archive.memory_page(project_key=key_b)["memories"])
+        with self.assertRaises(MemoryNotFound):
+            archive.edit(a["id"], "Cross project", revision=1, project_key=key_b)
+        with self.assertRaises(MemoryNotFound):
+            archive.forget(a["id"], project_key="")
+        edited = archive.edit(a["id"], "Scoped edit", revision=1, project_key=key_a)
+        self.assertEqual(key_a, edited["project_key"])
+        self.assertTrue(archive.forget(a["id"], project_key=key_a))
+
+    def test_invalid_project_keys_cannot_be_saved_or_retrieved(self):
+        archive = Archive(self.path)
+        for key in (None, [], "A" * 64, "x" * 64, "a" * 63, 42):
+            with self.subTest(key=key):
+                with self.assertRaises(ValueError):
+                    archive.remember("Invalid", project_key=key)
+                if key is not None:
+                    with self.assertRaises(ValueError):
+                        archive.list_memories(project_key=key)
+        self.assertEqual([], archive.list_memories())
+
+    def test_schema_two_migration_keeps_original_metadata_and_assigns_global(self):
+        archive = Archive(self.path)
+        memory = archive.remember("Version two note")
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("DROP INDEX memories_project_id")
+            db.execute("ALTER TABLE memories DROP COLUMN project_key")
+            db.execute("PRAGMA user_version = 2")
+        migrated = Archive(self.path)
+        self.assertEqual([memory], migrated.list_memories())
+        self.assertEqual([memory], Archive(self.path).list_memories())
+
+    def test_project_migration_failure_rolls_back_revision_schema_upgrade(self):
+        archive = Archive(self.path)
+        memory = archive.remember("Original")
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("DROP INDEX memories_project_id")
+            db.execute("ALTER TABLE memories DROP COLUMN project_key")
+            db.execute("PRAGMA user_version = 2")
+
+        class FailingConnection(sqlite3.Connection):
+            def execute(self, sql, parameters=()):
+                if sql.startswith("CREATE INDEX memories_project_id"):
+                    raise sqlite3.OperationalError("Injected project migration failure")
+                return super().execute(sql, parameters)
+
+        def connect(_archive):
+            db = sqlite3.connect(self.path, factory=FailingConnection)
+            db.row_factory = sqlite3.Row
+            return db
+
+        with patch.object(Archive, "_connect", connect):
+            with self.assertRaisesRegex(sqlite3.OperationalError, "project migration"):
+                Archive(self.path)
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(2, db.execute("PRAGMA user_version").fetchone()[0])
+            self.assertNotIn("project_key", [r[1] for r in db.execute("PRAGMA table_info(memories)")])
+        self.assertEqual([memory], Archive(self.path).list_memories())
 
 
 class ArchiveApiTests(unittest.TestCase):
@@ -591,6 +684,41 @@ class ArchiveApiTests(unittest.TestCase):
             self.assertEqual(0, json.loads(body)["memory_count"])
         finally:
             connection.close()
+
+    def test_project_scope_http_lifecycle_and_global_compatibility(self):
+        self.core.project_key = "a" * 64
+        other = self.archive.remember("Other project", project_key="b" * 64)
+        _, response = self.request("POST", payload={"note": "Global"})
+        global_memory = response["memory"]
+        code, response = self.request("POST", payload={"note": "Project", "scope": "project"})
+        self.assertEqual(201, code)
+        project_memory = response["memory"]
+        self.assertEqual(self.core.project_key, project_memory["project_key"])
+        self.assertEqual([global_memory], self.request("GET")[1]["memories"])
+        self.assertEqual([project_memory], self.request("GET", "/api/memories?scope=project")[1]["memories"])
+        path = f"/api/memories/{project_memory['id']}/edit"
+        payload = {"note": "Updated", "revision": 1}
+        self.assertEqual(404, self.request("POST", path, payload)[0])
+        code, response = self.request("POST", path, {**payload, "scope": "project"})
+        self.assertEqual(200, code)
+        self.assertEqual(self.core.project_key, response["memory"]["project_key"])
+        self.assertEqual(404, self.request("DELETE", f"/api/memories/{other['id']}?scope=project")[0])
+        self.assertEqual(404, self.request("DELETE", f"/api/memories/{project_memory['id']}")[0])
+        self.assertEqual(200, self.request("DELETE", f"/api/memories/{project_memory['id']}?scope=project")[0])
+        self.assertEqual(
+            (200, {"deleted": False}),
+            self.request("DELETE", f"/api/memories/{project_memory['id']}?scope=project"),
+        )
+        data = self.request("POST", "/api/memories/export", {})[1]
+        self.assertEqual({"", "b" * 64}, {m["project_key"] for m in data["memories"]})
+
+    def test_project_scope_requires_configured_project_and_valid_scope(self):
+        for scope in ("project", "", "all", None, [], "a" * 64):
+            with self.subTest(scope=scope):
+                self.assertEqual(400, self.request("POST", payload={"note": "Invalid", "scope": scope})[0])
+        for query in ("project", "", "all", "global&scope=project"):
+            self.assertEqual(400, self.request("GET", "/api/memories?scope=" + query)[0])
+        self.assertEqual([], self.archive.list_memories())
 
 
 if __name__ == "__main__":

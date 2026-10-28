@@ -12,8 +12,8 @@ the save request constitutes consent in this local single-user UI/API, not an
 authenticated consent audit. Migrated legacy notes have no known consent timestamp.
 Fiction is excluded from normal chat-memory retrieval; all other categories enter as
 untrusted reference text, with hypotheses and procedural authority explicitly
-qualified. Prompt labels do not enforce model reasoning. There are no project
-partitions, automatic expiry, encrypted exports, or recovery guarantees. Schema
+qualified. Prompt labels do not enforce model reasoning. There is no
+automatic expiry or encrypted export. Schema
 migration is transactional and refuses unsupported future versions; back up the
 database with ASTRA stopped before an upgrade.
 
@@ -24,6 +24,17 @@ counters are not a protected audit trail or historical backup. Deletion remains
 ID-based, so it is not guarded against edits made after the list was loaded.
 Older entries are accessible in bounded cursor pages; those pages are not immutable
 snapshots. No new shell, remote access, or model authority is granted.
+
+Project context retrieval includes only global notes and the configured repository's
+partition; without a project, retrieval is global-only. Project keys are hashes of
+local root paths, not secrets, Git identities, authenticated users or tenant
+authorization. HTTP clients select only global/current-project scope, not arbitrary
+keys; scope checks and edit/delete mutations share a transaction. Full exports and
+local snapshots deliberately include every partition. Existing notes migrate to
+global, so legacy project-specific information must be reviewed before cross-project
+use. No automatic reclassification or reassignment across moved/cloned roots exists.
+This boundary limits context mixing; it does not prevent the model from making
+incorrect associations or an OS-level user from reading the whole plaintext database.
 
 JSON export requires an explicit confirmed UI action or a local POST subject to
 the existing Host/Origin checks. It includes all saved categories and metadata and

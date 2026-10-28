@@ -109,6 +109,12 @@
         </div>
         <div class="memory">
           <div class="memorytitle"><span class="eyebrow">ARCHIVE / USER-APPROVED</span><span id="memory-count" class="micro">0 ENTRIES</span></div>
+          <label for="memory-scope">Browse and save scope</label>
+          <select id="memory-scope">
+            <option value="global">Global (available in all projects)</option>
+            <option id="memory-project-option" value="project" disabled>Current configured project</option>
+          </select>
+          <p id="memory-project-status" class="notice">Project scope requires configured repository context. Existing notes remain global.</p>
           <form id="memory-form" class="memory-editor">
             <label for="memory-kind">Memory category (user-supplied, not independently verified)</label>
             <select id="memory-kind" name="kind">

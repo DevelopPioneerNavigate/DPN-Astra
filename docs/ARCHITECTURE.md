@@ -42,11 +42,13 @@ Loopback HTTP fixture tests exercise the real request/response transport and its
 
 ## Structured memory foundation
 
-`Archive` uses SQLite `PRAGMA user_version = 2`. Startup takes a `BEGIN IMMEDIATE`
+`Archive` uses SQLite `PRAGMA user_version = 3`. Startup takes a `BEGIN IMMEDIATE`
 transaction before inspecting/migrating the schema, serializing concurrent
 initializers. Version-zero three-column memories gain `kind`, `provenance`,
 `source`, and nullable `consented_at` fields without rewriting IDs or note timestamps.
 Versions zero and one then gain `revision` (initially 1) and nullable `updated_at`.
+All earlier versions gain `project_key`, defaulting to empty/global, with a
+`(project_key, id)` retrieval index. Unknown legacy project ownership is not invented.
 Any failed migration rolls back schema/data/version changes. Unsupported future or
 incomplete schemas raise an explicit startup error.
 
@@ -80,9 +82,33 @@ The UI displays categories, sources, revision/edit timestamps and save provenanc
 text nodes. CORE retrieves the newest 20 non-fiction entries, filtering before
 limiting, and qualifies them as unverified, non-authoritative references. Fiction
 remains in Archive, separate from normal chat context. Conversation remains
-RAM-only. This is not a full layered-memory engine: project partitioning,
+RAM-only. This is not a full layered-memory engine:
 retention, evidence verification, procedural versioning, encryption and backup
 automation remain unfinished.
+
+### Project-scoped context
+
+CORE derives a stable local partition key from SHA-256 of the repository root path
+after OS path-case normalization (`RepositoryContext` already resolves the root).
+No repository means global-only context. `list_memories` supports an exact key
+filter or that key plus global, applied before ordering/limiting; the unfiltered
+internal default remains available for administrative storage operations.
+
+HTTP list/create/edit/delete operations accept only `global` (default) or `project`
+(requires configured context). The server maps scope to its configured key rather
+than trusting arbitrary client project keys. Edits/deletes check scope inside the
+same write transaction as mutation; wrong-scope IDs return 404. Missing DELETE IDs
+retain the prior `deleted: false` behavior. Existing notes retain their scope on edit.
+The console applies its selector to both browsing and saves; switching scope prompts
+before discarding a draft. Status exposes the current opaque key, not the root path.
+
+Partitions are path-derived, not Git identity or authenticated tenant boundaries.
+Different clones/moved roots produce distinct keys. No partition reassignment,
+project migration map or runtime project-switching API is implemented. Global notes
+are intentionally shared and legacy entries migrate global; users must review and
+reclassify legacy project-specific content by recreating it under the proper scope.
+Full exports and SQLite recovery include all keys, independent of the selected UI
+scope. Restoring to a different machine/root does not automatically remap project keys.
 
 ### Export and SQLite recovery boundary
 

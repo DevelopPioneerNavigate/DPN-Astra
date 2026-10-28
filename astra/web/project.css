@@ -9,3 +9,4 @@
 .memory-metadata{display:block;color:var(--soft);font-size:10px;margin-top:5px;overflow-wrap:anywhere}
 .memory-navigation,.memory-actions{display:flex;gap:8px;flex-wrap:wrap}
 .memory-editor [hidden]{display:none}
+#memory-scope{width:100%;margin-top:8px;padding:8px;background:#0d0a14;color:var(--white);border:1px solid var(--line);font:inherit}

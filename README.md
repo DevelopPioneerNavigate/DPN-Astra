@@ -52,7 +52,7 @@ as verified evidence. Each new save records its UTC timestamp and `user_entry`
 provenance. Saving through the local API is the same explicit retention request as
 clicking Save; these markers are not authenticated proof of consent.
 
-Existing three-column and version-1 databases migrate transactionally to schema version 2 while
+Existing three-column, version-1 and version-2 databases migrate transactionally to schema version 3 while
 preserving note IDs, contents, timestamps, and ID sequencing. Legacy entries are
 labeled `legacy_user_note` with an unknown (`null`) consent timestamp, not retroactively
 assigned a consent event. Newer unsupported or incompatible schemas fail startup
@@ -76,8 +76,32 @@ model behavior. The console displays 40 entries per page; **Older memories** and
 **Newest memories** make earlier saved entries available for review/edit/deletion.
 Pagination is based on descending IDs, not a frozen snapshot: concurrent inserts
 appear when you return to Newest, and deletions disappear. Storage remains
-unencrypted; project partitions, retention policies, encrypted recovery,
+unencrypted; retention policies, encrypted recovery,
 and evidence verification are not implemented.
+
+### Project memory partitions
+
+With `ASTRA_PROJECT_DIR` configured, the console offers **Current configured project**
+as a separate browse/save scope. The default remains **Global** for compatibility.
+Choose the scope before saving; editing keeps the original scope. Chat retrieves
+the newest 20 non-fiction entries from global plus the configured project only,
+filtering out other projects before applying the limit. Without repository context,
+only global memories enter chat.
+
+The project key is a SHA-256 digest of the normalized, resolved repository root
+path. It is local directory identity, **not** a Git remote identity, authorization
+token, or confidentiality mechanism. Different clones/paths intentionally receive
+different partitions; moving a repository or changing OS/path spelling conventions
+can change its key. There is no project-key reassignment/move tool yet. Export and
+SQLite snapshots retain all projects and their keys, including partitions not
+currently configured. To browse an existing partition, configure its original root.
+
+**Existing memories migrate to global**, because their original project is unknown.
+Review them before using ASTRA across projects; legacy project-specific notes can
+still appear in any project until you remove/recreate them in the appropriate scope.
+Global saves are explicit permission to reuse that note across projects. Prompt
+partition labels do not guarantee that the model will reason correctly. This is
+single-user context separation, not a multi-user access-control boundary.
 
 ### Export and recovery
 

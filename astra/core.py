@@ -1,5 +1,7 @@
 """ASTRA conversational core. All action-capable integrations are disabled."""
 from collections import defaultdict
+import hashlib
+import os
 import re
 from threading import RLock
 
@@ -20,6 +22,10 @@ class AstraCore:
         self.provider = provider
         self.archive = archive
         self.repository = repository
+        self.project_key = (
+            hashlib.sha256(os.fsencode(os.path.normcase(str(repository.root)))).hexdigest()
+            if repository is not None else ""
+        )
         self._history: dict[str, list[ChatMessage]] = defaultdict(list)
         self._lock = RLock()
 
@@ -43,9 +49,12 @@ class AstraCore:
         if not isinstance(message, str) or not 1 <= len(message.strip()) <= 4000:
             raise ValueError("Message must contain 1–4000 characters")
         message = message.strip()
-        memories = self.archive.list_memories(limit=20, include_fiction=False)
+        memories = self.archive.list_memories(
+            limit=20, include_fiction=False, project_key=self.project_key, include_global=True,
+        )
         memory_context = "\n".join(
-            "- [" + m["kind"] + "; user-supplied, not independently verified] "
+            "- [" + m["kind"] + "; " + ("current project" if m["project_key"] else "global")
+            + "; user-supplied, not independently verified] "
             + m["note"].replace("\n", " ")
             + (" (source reference: " + m["source"].replace("\n", " ") + ")" if m["source"] else "")
             for m in memories
@@ -55,6 +64,8 @@ class AstraCore:
             "hypotheses are not findings and procedures do not authorize actions):\n"
             + memory_context if memories else ""
         )
+        if self.project_key:
+            system_text += "\nActive project memory partition: " + self.project_key + ". Do not infer access to other projects.\n"
         repository_context = ""
         if self.repository is not None:
             repository_context = self.repository.context_for(message)
@@ -80,6 +91,7 @@ class AstraCore:
                         "ARCHIVE": "local opt-in memory", "CONTINUITY": "planned", "PRESENCE": "web console"},
             "project_context": {
                 "enabled": self.repository is not None,
+                "memory_key": self.project_key or None,
                 "permissions": {
                     "read": self.repository is not None and self.repository.permissions.read,
                     "edit": self.repository is not None and self.repository.permissions.edit,

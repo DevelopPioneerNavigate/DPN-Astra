@@ -62,6 +62,13 @@ def make_handler(core: AstraCore):
                 raise ValueError("Expected a JSON object")
             return obj
 
+        def _memory_scope(self, scope):
+            if scope == "global":
+                return ""
+            if scope == "project" and core.project_key:
+                return core.project_key
+            raise ValueError("Memory scope must be global or an enabled current project")
+
         def do_GET(self):
             if not self._authorized_host():
                 return
@@ -96,7 +103,12 @@ def make_handler(core: AstraCore):
                     if cursor is not None and (len(cursor) != 1 or not cursor[0].isascii() or not cursor[0].isdecimal()):
                         raise ValueError("Invalid memory cursor")
                     before_id = int(cursor[0]) if cursor is not None else None
-                    self._send(200, core.archive.memory_page(before_id=before_id))
+                    scopes = query.get("scope", ["global"])
+                    if len(scopes) != 1:
+                        raise ValueError("Expected one memory scope")
+                    self._send(200, core.archive.memory_page(
+                        before_id=before_id, project_key=self._memory_scope(scopes[0]),
+                    ))
                 except ValueError as exc:
                     self._send(400, {"error": str(exc)})
                 except sqlite3.Error:
@@ -159,6 +171,7 @@ def make_handler(core: AstraCore):
                         body.get("note"),
                         kind=body.get("kind", "note"),
                         source=body.get("source", ""),
+                        project_key=self._memory_scope(body.get("scope", "global")),
                     )})
                 elif path == "/api/memories/export":
                     exported = core.archive.export_json()
@@ -175,6 +188,7 @@ def make_handler(core: AstraCore):
                     self._send(200, {"memory": core.archive.edit(
                         int(parts[2]), body.get("note"), revision=body.get("revision"),
                         kind=body.get("kind", "note"), source=body.get("source", ""),
+                        project_key=self._memory_scope(body.get("scope", "global")),
                     )})
                 elif path == "/api/history/clear":
                     core.clear_history(body.get("session", "default"))
@@ -251,9 +265,16 @@ def make_handler(core: AstraCore):
                 return
             try:
                 value = int(path.rsplit("/", 1)[1])
-                self._send(200, {"deleted": core.archive.forget(value)})
+                scopes = parse_qs(urlsplit(self.path).query, keep_blank_values=True).get("scope", ["global"])
+                if len(scopes) != 1:
+                    raise ValueError("Expected one memory scope")
+                self._send(200, {"deleted": core.archive.forget(
+                    value, project_key=self._memory_scope(scopes[0]),
+                )})
             except ValueError:
                 self._send(400, {"error": "Invalid memory ID"})
+            except MemoryNotFound as exc:
+                self._send(404, {"error": str(exc)})
             except sqlite3.Error:
                 self._send(503, {"error": "Memory storage unavailable"})
 

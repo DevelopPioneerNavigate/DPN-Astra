@@ -27,12 +27,13 @@ class MemoryBackupTests(unittest.TestCase):
         first = self.archive.remember("A retained note")
         self.archive.edit(first["id"], "Approved revision", revision=1, source="Lab notebook")
         self.archive.remember("A fictional event", kind="fiction")
+        self.archive.remember("Project-scoped entry", project_key="a" * 64)
         deleted = self.archive.remember("Deleted entry")
         self.archive.forget(deleted["id"])
         original = self.archive.list_memories()
         result = create_snapshot(self.source, self.destination)
         self.assertEqual(
-            {"schema_version": SCHEMA_VERSION, "memory_count": 2, "integrity": "ok"},
+            {"schema_version": SCHEMA_VERSION, "memory_count": 3, "integrity": "ok"},
             result,
         )
         self.assertEqual(result, verify_snapshot(self.destination))

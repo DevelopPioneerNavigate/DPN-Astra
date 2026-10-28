@@ -96,6 +96,11 @@
       const ready = model.connected && model.model_installed;
       $("project-state").textContent = status.project_context.enabled ? "READ-ONLY PROJECT CONTEXT: ON" : "PROJECT CONTEXT: OFF";
       $("project-inspector").hidden = !status.project_context.enabled;
+      $("memory-project-option").disabled = !status.project_context.memory_key;
+      $("memory-project-status").textContent = status.project_context.memory_key
+        ? "Current project partition: " + status.project_context.memory_key
+          + ". Chat uses global notes plus this project only."
+        : "No project configured. Chat uses global notes only.";
       statusChip.textContent = ready ? "MODEL ONLINE" : model.connected ? "MODEL NOT INSTALLED" : "PROVIDER UNAVAILABLE";
       statusChip.title = model.error || status.provider;
       statusChip.classList.toggle("good", ready);
@@ -165,6 +170,19 @@
   let editingMemory = null;
   let memoryLoading = false;
   let memorySaving = false;
+  let memoryScope = "global";
+
+  $("memory-scope").addEventListener("change", async () => {
+    if (($("memory-input").value || $("memory-source").value)
+      && !confirm("Discard the current draft and switch memory scope?")) {
+      $("memory-scope").value = memoryScope;
+      return;
+    }
+    cancelMemoryEdit();
+    const scope = $("memory-scope").value;
+    const refreshed = await refreshMemories(null, scope);
+    if (!refreshed) $("memory-scope").value = memoryScope;
+  });
 
   function cancelMemoryEdit() {
     editingMemory = null;
@@ -207,17 +225,19 @@
     if (memoryNextId !== null) refreshMemories(memoryNextId);
   });
 
-  async function refreshMemories(beforeId = memoryBeforeId) {
+  async function refreshMemories(beforeId = memoryBeforeId, scope = memoryScope) {
     if (memoryLoading) return;
     memoryLoading = true;
     $("memory-newest").disabled = true;
     $("memory-older").disabled = true;
+    $("memory-scope").disabled = true;
     try {
       const { memories, next_before_id: nextId } = await api(
-        "/api/memories" + (beforeId === null ? "" : "?before_id=" + beforeId)
+        "/api/memories?scope=" + scope + (beforeId === null ? "" : "&before_id=" + beforeId)
       );
       memoryBeforeId = beforeId;
       memoryNextId = nextId;
+      memoryScope = scope;
       $("memory-count").textContent = memories.length + (beforeId === null ? " NEWEST ENTRIES" : " OLDER ENTRIES");
       const list = $("memory-list");
       list.replaceChildren();
@@ -228,6 +248,7 @@
         const metadata = document.createElement("small");
         metadata.className = "memory-metadata";
         metadata.textContent = memory.kind + " | " + memory.provenance
+          + " | " + (memory.project_key ? "current project" : "global")
           + " | " + (memory.consented_at ? "Saved with approval: " + memory.consented_at : "Legacy note; consent time unknown")
           + (memory.source ? " | Source (user-supplied): " + memory.source : "")
           + " | Revision " + memory.revision
@@ -256,7 +277,7 @@
         button.setAttribute("aria-label", "Forget memory " + memory.id);
         button.addEventListener("click", async () => {
           try {
-            await api("/api/memories/" + memory.id, { method: "DELETE" });
+            await api("/api/memories/" + memory.id + "?scope=" + memoryScope, { method: "DELETE" });
             if (editingMemory && editingMemory.id === memory.id) cancelMemoryEdit();
             await refreshMemories();
           }
@@ -274,6 +295,7 @@
       memoryLoading = false;
       $("memory-newest").disabled = memorySaving;
       $("memory-older").disabled = memorySaving || memoryNextId === null;
+      $("memory-scope").disabled = memorySaving;
     }
   }
 
@@ -283,6 +305,7 @@
     if (!note) return;
     if (memorySaving) return;
     memorySaving = true;
+    $("memory-scope").disabled = true;
     for (const control of document.querySelectorAll("#memory-form input, #memory-form select, #memory-form button, #memory-list button, .memory-navigation button")) {
       control.disabled = true;
     }
@@ -291,6 +314,7 @@
       await api(edited ? "/api/memories/" + edited.id + "/edit" : "/api/memories", {
         method: "POST", body: JSON.stringify({
           note, kind: $("memory-kind").value, source: $("memory-source").value.trim(),
+          scope: memoryScope,
           ...(edited ? { revision: edited.revision } : {})
         })
       });
@@ -311,6 +335,7 @@
       }
       $("memory-newest").disabled = memoryLoading;
       $("memory-older").disabled = memoryLoading || memoryNextId === null;
+      $("memory-scope").disabled = memoryLoading;
     }
   });
 
