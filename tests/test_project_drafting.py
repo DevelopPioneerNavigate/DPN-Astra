@@ -57,6 +57,7 @@ class ProjectDraftingTests(unittest.TestCase):
 
     def test_prompt_contains_exact_target_and_bounded_repository_evidence(self):
         self.draft()
+        self.assertEqual({"json_mode": True}, self.provider.chat.call_args.kwargs)
         messages = self.provider.chat.call_args.args[0]
         self.assertEqual(["system", "user"], [m["role"] for m in messages])
         request = json.loads(messages[1]["content"])
@@ -79,6 +80,17 @@ class ProjectDraftingTests(unittest.TestCase):
                 self.drafting.draft(path, "Change it", confirmed=True)
         self.provider.chat.assert_not_called()
         self.assertEqual([], self.repository.changes.audit_log()["events"])
+
+    def test_single_draft_accepts_full_instruction_limit(self):
+        instruction = "Preserve behavior. " * 220
+        instruction = instruction[:3993] + " value."
+        self.assertEqual(4000, len(instruction))
+        response = self.drafting.draft("sample.py", instruction, confirmed=True)
+        request = json.loads(self.provider.chat.call_args.args[0][1]["content"])
+        self.assertEqual(instruction, request["instruction"])
+        self.assertIn("[sample.py]", request["repository_evidence"])
+        self.assertEqual("pending", response["proposal"]["state"])
+        self.assertEqual(self.original, self.target.read_bytes())
 
     def test_malformed_model_responses_never_stage_or_write(self):
         for answer in (
@@ -115,7 +127,7 @@ class ProjectDraftingTests(unittest.TestCase):
         self.assertEqual([], self.repository.changes.audit_log()["events"])
 
     def test_source_modified_during_inference_cannot_be_staged(self):
-        def inference(_messages):
+        def inference(_messages, *, json_mode=False):
             self.target.write_text("value = 99\n", encoding="utf-8")
             return json.dumps({"content": "value = 2\n"})
 
@@ -136,7 +148,7 @@ class ProjectDraftingTests(unittest.TestCase):
         entered, release = Event(), Event()
         results, errors = [], []
 
-        def inference(_messages):
+        def inference(_messages, *, json_mode=False):
             entered.set()
             if not release.wait(5):
                 raise RuntimeError("Test did not release inference")
@@ -231,6 +243,7 @@ class ProjectDraftingTests(unittest.TestCase):
     def test_multi_prompt_discloses_only_selected_sources_and_bounded_evidence(self):
         self.prepare_set()
         self.draft_set()
+        self.assertEqual({"json_mode": True}, self.provider.chat.call_args.kwargs)
         messages = self.provider.chat.call_args.args[0]
         request = json.loads(messages[1]["content"])
         self.assertEqual("Change both values", request["instruction"])
@@ -241,6 +254,19 @@ class ProjectDraftingTests(unittest.TestCase):
         self.assertEqual({"instruction", "targets", "repository_evidence"}, set(request))
         self.assertIn("untrusted", messages[0]["content"])
         self.assertIn("no tools", messages[0]["content"])
+
+    def test_multi_draft_accepts_full_instruction_limit(self):
+        self.prepare_set()
+        instruction = ("Preserve behavior. " * 220)[:3993] + " value."
+        response = self.drafting.draft_many(
+            ["sample.py", "other.json"], instruction, confirmed=True,
+        )
+        request = json.loads(self.provider.chat.call_args.args[0][1]["content"])
+        self.assertEqual(instruction, request["instruction"])
+        self.assertIn("[sample.py]", request["repository_evidence"])
+        self.assertEqual(2, len(response["changes"]))
+        self.assertEqual(self.original, self.target.read_bytes())
+        self.assertEqual(b'{"value":1}\n', self.second.read_bytes())
 
     def test_multi_request_rejections_precede_model_call(self):
         self.prepare_set()
@@ -329,7 +355,7 @@ class ProjectDraftingTests(unittest.TestCase):
     def test_multi_every_source_hash_checked_after_inference(self):
         self.prepare_set()
         for target in (self.target, self.second):
-            def inference(_messages):
+            def inference(_messages, *, json_mode=False):
                 target.write_bytes(b"changed externally\n")
                 return json.dumps({"files": self.entries})
 
@@ -345,7 +371,7 @@ class ProjectDraftingTests(unittest.TestCase):
         entered, release = Event(), Event()
         errors = []
 
-        def inference(_messages):
+        def inference(_messages, *, json_mode=False):
             entered.set()
             if not release.wait(5):
                 raise RuntimeError("Test did not release inference")
@@ -423,6 +449,16 @@ class ProjectDraftApiTests(unittest.TestCase):
         self.assertEqual(200, self.post({"confirm": True}, path)[0])
         self.assertEqual("value = 2\n", self.target.read_text())
         self.assertEqual([], self.core.history())
+
+    def test_project_chat_accepts_full_message_limit(self):
+        message = ("Explain behavior. " * 240)[:3993] + " value."
+        self.provider.chat.return_value = "The sample sets value to one."
+        code, result = self.post({"message": message}, "/api/chat")
+        self.assertEqual(200, code)
+        self.assertEqual("The sample sets value to one.", result["reply"])
+        messages = self.provider.chat.call_args.args[0]
+        self.assertEqual(message, messages[-1]["content"])
+        self.assertIn("[sample.py]", messages[-2]["content"])
 
     def test_http_draft_errors_and_origin_guard(self):
         payload = {"path": "sample.py", "instruction": "Change value", "confirm": True}

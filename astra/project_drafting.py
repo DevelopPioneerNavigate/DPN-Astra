@@ -139,7 +139,7 @@ class ProjectDrafting:
             raise ValueError("Draft instruction must contain 1-4000 characters")
 
     def _generate(self, messages: list[ChatMessage], limit: int):
-        answer = self.provider.chat(messages)
+        answer = self.provider.chat(messages, json_mode=True)
         if not isinstance(answer, str):
             raise ModelError("Draft provider did not return text")
         try:

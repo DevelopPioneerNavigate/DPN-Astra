@@ -50,7 +50,7 @@ class DraftingTaskTests(unittest.TestCase):
         entered, release = Event(), Event()
         self.addCleanup(release.set)
 
-        def inference(_messages):
+        def inference(_messages, *, json_mode=False):
             entered.set()
             if not release.wait(5):
                 raise RuntimeError("Test did not release provider")
@@ -134,9 +134,11 @@ class DraftingTaskTests(unittest.TestCase):
     def test_budget_boundary_is_elapsed_greater_than_or_equal_to_limit(self):
         task, release = self.blocked_provider()
         stored = self.tasks._tasks[task["id"]]
-        with patch("astra.drafting_tasks.time.monotonic", return_value=stored.started + stored.budget_seconds - .001):
+        stored.started = 100.0
+        boundary = stored.started + stored.budget_seconds
+        with patch("astra.drafting_tasks.time.monotonic", return_value=boundary - 1):
             self.assertEqual("inference", self.tasks.status(task["id"])["state"])
-        with patch("astra.drafting_tasks.time.monotonic", return_value=stored.started + stored.budget_seconds):
+        with patch("astra.drafting_tasks.time.monotonic", return_value=boundary):
             self.assertEqual("timed_out", self.tasks.status(task["id"])["state"])
         release.set()
         self.assertEqual("timed_out", self.wait(task["id"])["state"])
@@ -195,7 +197,7 @@ class DraftingTaskTests(unittest.TestCase):
         self.assertEqual("failed", result["state"])
         self.assertIn("ProjectSyntaxError", result["error"])
 
-        def changed(_messages):
+        def changed(_messages, *, json_mode=False):
             self.target.write_text("value = 99\n")
             return self.answer
 
@@ -290,7 +292,7 @@ class DraftingTaskApiTests(unittest.TestCase):
         exited = Event()
         self.addCleanup(release.set)
 
-        def inference(_messages):
+        def inference(_messages, *, json_mode=False):
             entered.set()
             try:
                 if not release.wait(5):

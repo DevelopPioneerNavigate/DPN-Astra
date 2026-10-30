@@ -3,6 +3,7 @@ from astra.archive import Archive
 from astra.config import Config
 from astra.core import AstraCore
 from astra.provider import OllamaProvider
+from astra.permissions import RepositoryPermissions
 from astra.repository import RepositoryContext
 from astra.server import serve
 
@@ -14,6 +15,10 @@ def main():
     repository = (
         RepositoryContext(
             config.project_dir,
+            permissions=RepositoryPermissions(
+                read=True,
+                execute=config.project_execute,
+            ),
             audit_path=data_dir / "astra_project_audit.sqlite3",
         )
         if config.project_dir

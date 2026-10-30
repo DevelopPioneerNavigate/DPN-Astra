@@ -12,6 +12,7 @@
   let busy = false;
   let stagedChange = null;
   let rollbackChange = null;
+  let sandboxRunInProgress = false;
 
   function display(role, value, label) {
     const div = document.createElement("div");
@@ -89,6 +90,107 @@
     }
   }
 
+  async function refreshSandboxReadiness(updateStatus = true) {
+    const status = $("project-sandbox-status");
+    const button = $("project-test-run");
+    button.disabled = true;
+    try {
+      const readiness = await api("/api/project/sandbox");
+      if (updateStatus) status.textContent = readiness.status.toUpperCase() + ": " + readiness.reason;
+      button.disabled = !readiness.enabled;
+    } catch (error) {
+      if (updateStatus) status.textContent = "Sandbox readiness check failed: " + (error.message || String(error));
+    }
+  }
+
+  async function refreshSandboxHistory() {
+    const status = $("project-sandbox-history-status");
+    const list = $("project-sandbox-history");
+    status.textContent = "Loading persistent sandbox run metadata…";
+    list.replaceChildren();
+    try {
+      const response = await api("/api/project/sandbox-runs");
+      for (const event of response.events) {
+        const item = document.createElement("li");
+        item.textContent = new Date(event.timestamp).toLocaleString() + " — " +
+          event.state + " — " + event.profile + " — exit " +
+          (event.exit_code === null ? "n/a" : event.exit_code) + " — " +
+          event.duration_ms + " ms — image " + event.image_digest +
+          (event.output_truncated ? " — output truncated" : "");
+        list.append(item);
+      }
+      status.textContent = "Persistent metadata: showing " + response.events.length +
+        " of " + response.total + " run(s).";
+      if (response.integrity) {
+        status.textContent += response.integrity.valid
+          ? " Hash chain verified (" + response.integrity.checked + " events)."
+          : " HASH CHAIN INVALID at event " + response.integrity.first_invalid_sequence + ".";
+      }
+      if (!response.total) status.textContent += " No sandbox runs recorded.";
+    } catch (error) {
+      status.textContent = "Could not load sandbox run history: " + (error.message || String(error));
+    }
+  }
+
+  async function runSandboxTests() {
+    const button = $("project-test-run");
+    const cancelButton = $("project-test-cancel");
+    const status = $("project-sandbox-status");
+    const output = $("project-sandbox-output");
+    if (!confirm(
+      "Run the fixed Python unit-test profile in the pinned local Podman sandbox?\n\n" +
+      "The configured repository is mounted read-only. Network is disabled; the container " +
+      "runs as an unprivileged user with no capabilities, a read-only root, bounded CPU/" +
+      "processes and a 180-second wall timeout. Temporary output is capped at 64 KiB. " +
+      "The 4 GiB limit applies to the Podman VM; there is no verified per-container memory limit. " +
+      "Tests may be slow. Only run this for source you trust."
+    )) return;
+    button.disabled = true;
+    sandboxRunInProgress = true;
+    cancelButton.disabled = false;
+    output.textContent = "";
+    status.textContent = "Starting the confirmed, fixed-profile sandbox test run…";
+    try {
+      const response = await api("/api/project/test-run", {
+        method: "POST",
+        body: JSON.stringify({ confirm: true, profile: "unit_tests" })
+      });
+      const run = response.run;
+      output.textContent = run.output || "(No test output.)";
+      status.textContent = "Sandbox run " + run.state + " in " + run.duration_ms + " ms. " +
+        (run.isolation_preflight_passed
+          ? "In-container isolation preflight passed. "
+          : "WARNING: in-container isolation preflight did not pass. ") +
+        run.memory_limit_note;
+      if (run.output_truncated) status.textContent += " Output was capped at 64 KiB.";
+      await refreshSandboxHistory();
+    } catch (error) {
+      status.textContent = "Sandbox run was not completed: " + (error.message || String(error));
+    } finally {
+      sandboxRunInProgress = false;
+      cancelButton.disabled = true;
+      await refreshSandboxReadiness(false);
+    }
+  }
+
+  async function cancelSandboxTests() {
+    const button = $("project-test-cancel");
+    const status = $("project-sandbox-status");
+    if (!confirm("Stop the active sandbox test process and remove its disposable container?")) return;
+    button.disabled = true;
+    try {
+      const response = await api("/api/project/test-cancel", {
+        method: "POST",
+        body: JSON.stringify({ confirm: true })
+      });
+      status.textContent = "Cancellation requested for sandbox run " + response.cancel.run_id +
+        ". ASTRA is stopping the runner and cleaning up its container.";
+    } catch (error) {
+      status.textContent = "Could not cancel sandbox run: " + (error.message || String(error));
+      button.disabled = !sandboxRunInProgress;
+    }
+  }
+
   async function refreshStatus() {
     try {
       const status = await api("/api/status");
@@ -107,17 +209,22 @@
       const descriptions = {
         CORE: "Reasoning engine", SENSE: "Instrument telemetry", COMMAND: "Authorized operations",
         WATCH: "Security / anomaly", ARCHIVE: "User-approved memory",
-        CONTINUITY: "Protected recovery", PRESENCE: "Interface / voice"
+        CONTINUITY: "Protected recovery", PRESENCE: "Interface / voice",
+        "CODE EXECUTION": status.coding_execution.reason
       };
       systems.replaceChildren();
-      for (const [name, state] of Object.entries(status.modules)) {
+      const entries = Object.entries(status.modules);
+      entries.push(["CODE EXECUTION", status.coding_execution.status]);
+      for (const [name, state] of entries) {
         const row = document.createElement("div"); row.className = "system";
         const left = document.createElement("div");
         const title = document.createElement("b"); title.textContent = name;
         const info = document.createElement("small"); info.textContent = descriptions[name] || "";
         left.append(title, info);
         const stateNode = document.createElement("span");
-        stateNode.className = "state " + (state === "operational" ? "good" : state === "model unavailable" ? "warning" : "");
+        stateNode.className = "state " +
+          (name === "CODE EXECUTION" || state === "model unavailable"
+            ? "warning" : state === "operational" ? "good" : "");
         stateNode.textContent = state;
         row.append(left, stateNode);
         systems.append(row);
@@ -591,9 +698,14 @@
   });
 
   $("project-history-refresh").addEventListener("click", refreshProjectHistory);
+  $("project-sandbox-history-refresh").addEventListener("click", refreshSandboxHistory);
+  $("project-test-run").addEventListener("click", runSandboxTests);
+  $("project-test-cancel").addEventListener("click", cancelSandboxTests);
   $("project-inspector").addEventListener("toggle", () => {
     if (!$("project-inspector").open) return;
     refreshProjectHistory();
+    refreshSandboxReadiness();
+    refreshSandboxHistory();
   });
 
   $("project-propose").addEventListener("click", async () => {

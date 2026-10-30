@@ -64,7 +64,7 @@ class TaskCheckpointTests(unittest.TestCase):
         entered, release = Event(), Event()
         answer = self.provider.chat.return_value
 
-        def inference(_messages):
+        def inference(_messages, *, json_mode=False):
             entered.set()
             if not release.wait(5):
                 raise RuntimeError("Test did not release provider")
@@ -244,7 +244,7 @@ entered = Event()
 class Provider:
     name = "Process-exit test fixture"
     model = "no-live-model"
-    def chat(self, messages):
+    def chat(self, messages, *, json_mode=False):
         entered.set()
         Event().wait(60)
 

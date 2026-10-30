@@ -13,6 +13,7 @@ class Config:
     data_dir: Path = Path.home() / ".dpn-astra"
     port: int = 8766
     project_dir: Path | None = None
+    project_execute: bool = False
 
     def prepare_data_dir(self) -> Path:
         """Create and return the persistent data directory with private defaults."""
@@ -51,6 +52,9 @@ class Config:
         project_dir = Path(project_dir_value).expanduser().resolve() if project_dir_value else None
         if project_dir is not None and not project_dir.is_dir():
             raise ValueError("ASTRA_PROJECT_DIR must point to an existing directory")
+        execute_value = os.getenv("ASTRA_PROJECT_EXECUTE", "false").strip().lower()
+        if execute_value not in {"true", "false"}:
+            raise ValueError("ASTRA_PROJECT_EXECUTE must be exactly true or false")
         return cls(
             model=model,
             ollama_url=url,
@@ -59,4 +63,5 @@ class Config:
             ).expanduser(),
             port=port,
             project_dir=project_dir,
+            project_execute=execute_value == "true",
         )

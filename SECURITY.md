@@ -59,9 +59,57 @@ Ollama transport validates the loopback endpoint even when constructed outside e
 
 The language model has no tools, shell commands, network connectors, robotics authority or credential access. The configured Ollama endpoint is restricted to loopback. Optional `ASTRA_PROJECT_DIR` context is bounded by directory-entry, file-count and byte limits; common dependency/build directories, symlinks and credential-named files are excluded, and common secret assignments are redacted. These filters are best-effort, not a guarantee that project content contains no sensitive data. Relevant source excerpts are included in prompts sent to the configured local Ollama service. Only enable this feature for a project whose contents you are willing to send to that local model.
 
-The project workbench permits a user-confirmed one-file change only for an existing, eligible UTF-8 text file under the configured project root. It stages a diff first, checks the original file hash before applying, writes through a same-directory temporary file, and keeps an in-memory original snapshot for guarded rollback. Apply and rollback require separate explicit confirmation; rollback refuses to overwrite intervening changes. Proposal snapshots expire after 15 minutes or when ASTRA exits. This is a local single-user prototype, not authenticated authorization: do not expose it to other users or networks. Supported Python/JSON/TOML proposals must pass bounded static parsing before staging; project-wide validation returns at most 100 diagnostics while counts cover all scanned files. These checks do not establish runtime correctness. No project shell, build, or test command is executed: doing so requires a real sandbox and a separate security review. Browser-based dictation availability and privacy are implementation/browser dependent; it must be used only with user consent. The console renders model, source, and diff text with `textContent`.
+The project workbench permits a user-confirmed one-file change only for an existing, eligible UTF-8 text file under the configured project root. It stages a diff first, checks the original file hash before applying, writes through a same-directory temporary file, and keeps an in-memory original snapshot for guarded rollback. Apply and rollback require separate explicit confirmation; rollback refuses to overwrite intervening changes. Proposal snapshots expire after 15 minutes or when ASTRA exits. This is a local single-user prototype, not authenticated authorization: do not expose it to other users or networks. Supported Python/JSON/TOML proposals must pass bounded static parsing before staging; project-wide validation returns at most 100 diagnostics while counts cover all scanned files. These checks do not establish runtime correctness. The fixed, separately confirmed sandbox test profile is the only project-code execution; arbitrary commands and builds remain unavailable. Browser-based dictation availability and privacy are implementation/browser dependent; it must be used only with user consent. The console renders model, source, and diff text with `textContent`.
 
-When project context is enabled, lifecycle events for staged, applied, rolled-back, and expired proposals are stored in `ASTRA_DATA_DIR/astra_project_audit.sqlite3`. The endpoint returns at most the latest 100 events, while the underlying ledger is retained without automatic truncation. Metadata includes timestamps, paths, proposal IDs, states, and content hashes, but not source content. A SHA-256 hash chain detects inconsistencies when verified; it is not authenticated or tamper-proof, since an actor able to modify the database can recompute the chain. This is not a protected security audit boundary. Without project context, the capped 100-event history remains in process memory and is lost on exit.
+The status endpoint checks the configured fixed-profile runner, rootless WSL machine,
+pinned local image, and execute opt-in. Its `isolation_verified` readiness field
+remains false; only the per-run `isolation_preflight_passed` result reports whether
+the in-container checks actually succeeded.
+
+### Fixed-profile project test sandbox
+
+`ASTRA_PROJECT_EXECUTE` defaults to `false` and accepts only `true` or `false`
+(case-insensitive after whitespace trimming). Enabling it is a local operator
+choice, not an HTTP/API permission: every test run separately requires a literal
+confirmation and a fixed `unit_tests` profile. The endpoint rejects extra request
+fields; it accepts no shell text or arbitrary command arguments. The runner invokes
+the explicit local Podman connection and checks that the named WSL machine is
+running, rootless, and configured for 2 CPUs/4096 MiB, the service is rootless, the
+pinned Python 3.12 image is already present, and persistent project audit storage
+exists. It never pulls an image or installs dependencies.
+
+Each disposable container runs with networking disabled, the project mounted
+read-only, a read-only root, UID/GID 1000, all capabilities dropped,
+no-new-privileges, and a no-exec `/tmp` tmpfs. CPU time is limited to 300 seconds,
+the process limit is 128, wall time is limited to 180 seconds, and output capture
+is capped at 64 KiB. Before tests are discovered, an in-container preflight checks
+the UID, effective capabilities, no-new-privileges, CPU/process limits, read-only
+mounts, absence of the Windows drive mount, no-exec temporary filesystem, and
+network denial. An unsuccessful preflight prevents the suite from running. A
+separately confirmed cancellation request terminates the active Podman client;
+the run thread then force-removes the named disposable container and audits the
+cancelled outcome. Cancellation cannot guarantee immediate termination of an
+underlying runtime failure; cleanup errors are surfaced and audited.
+
+Rootless Podman on the verified setup has no delegated per-container memory
+cgroup, so a per-container memory limit is **not** claimed or enforced. The WSL VM
+itself is configured for 4 GiB; this is only a VM-level bound. The status endpoint
+reports prerequisites and opt-in state only. Container isolation is
+not protection against vulnerabilities in Podman/the VM/kernel, malicious tests
+within their limits, or interference by another local user/process. Tests may
+perform side effects in their disposable writable `/tmp`; project files are
+read-only. Use only with trusted source.
+
+Every attempt that reaches the runner records a persistent project-scoped metadata
+event (run ID, profile, pinned image digest, outcome, duration and output-truncated
+flag) in the audit database. Output, source, and exception text are not persisted.
+The SHA-256 chain is not authenticated and can be recomputed by an actor able to
+modify the database. Test output is returned only to the local request that started
+the run and is rendered as text. A passing run means only that this specific test
+suite passed at that time; it does not establish overall correctness or complete
+the master project directive.
+
+When project context is enabled, lifecycle events for staged, applied, rolled-back, and expired proposals, plus bounded sandbox test-run metadata, are stored in `ASTRA_DATA_DIR/astra_project_audit.sqlite3`. The endpoint returns at most the latest 100 events per history, while the underlying ledgers are retained without automatic truncation. Metadata includes timestamps, paths, proposal IDs, states, content hashes, and the sandbox profile/image/outcome; it does not include source content or test output. The proposal and sandbox SHA-256 hash chains detect inconsistencies when verified; they are not authenticated or tamper-proof, since an actor able to modify the database can recompute a chain. This is not a protected security audit boundary.
 
 ## Model-assisted drafting
 

@@ -102,6 +102,16 @@ class OllamaTransportTests(unittest.TestCase):
             json.loads(body),
         )
 
+    def test_json_mode_requests_structured_output_without_changing_messages(self):
+        self.payload = {"message": {"content": '{"content":"value = 2\\n"}'}}
+        messages = [{"role": "user", "content": "Return JSON with a content string."}]
+        answer = self.provider.chat(messages, json_mode=True)
+        self.assertEqual({"content": "value = 2\n"}, json.loads(answer))
+        payload = json.loads(self.requests[0][2])
+        self.assertEqual("json", payload["format"])
+        self.assertEqual(messages, payload["messages"])
+        self.assertFalse(payload["stream"])
+
     def test_chat_rejects_invalid_shapes_without_attribute_errors(self):
         for payload in (
             [],
@@ -256,7 +266,7 @@ class InferenceContractTests(unittest.TestCase):
                     "installed_models": ["test-model"],
                 }
 
-            def chat(self, messages: list[ChatMessage]) -> str:
+            def chat(self, messages: list[ChatMessage], *, json_mode: bool = False) -> str:
                 return "Fixture answer: " + messages[-1]["content"]
 
         provider: InferenceProvider = TestLocalProvider()

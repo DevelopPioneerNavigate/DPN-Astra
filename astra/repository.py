@@ -13,6 +13,8 @@ MAX_ENTRIES = 10_000
 MAX_FILE_BYTES = 128 * 1024
 MAX_TOTAL_BYTES = 8 * 1024 * 1024
 MAX_CONTEXT_CHARS = 12_000
+MAX_CONTEXT_QUERY_CHARS = 4_000
+MAX_SEARCH_QUERY_CHARS = 200
 MAX_MATCHED_FILES = 6
 MAX_EXCERPT_LINES = 32
 MAX_EXCERPT_CHARS = 1_800
@@ -64,7 +66,7 @@ class RepositoryContext:
         self.validation = ProjectValidation(self.changes, self.files)
 
     def context_for(self, query: str) -> str:
-        result = self.search(query)
+        result = self._search(query, MAX_MATCHED_FILES, MAX_CONTEXT_QUERY_CHARS)
         warnings = result["warnings"]
         if not result["matches"] and not warnings:
             return ""
@@ -104,9 +106,14 @@ class RepositoryContext:
         }
 
     def search(self, query: str, limit: int = MAX_MATCHED_FILES):
+        return self._search(query, limit, MAX_SEARCH_QUERY_CHARS)
+
+    def _search(self, query: str, limit: int, max_query_chars: int):
         self.permissions.require_read()
-        if not isinstance(query, str) or len(query) > 200:
-            raise ValueError("Project search query must contain at most 200 characters")
+        if not isinstance(query, str) or len(query) > max_query_chars:
+            raise ValueError(
+                f"Project search query must contain at most {max_query_chars} characters"
+            )
         if type(limit) is not int or not 1 <= limit <= MAX_MATCHED_FILES:
             raise ValueError(f"Project search result limit must be between 1 and {MAX_MATCHED_FILES}")
         terms = {

@@ -6,6 +6,7 @@ import re
 from threading import RLock
 
 from .inference import ChatMessage, InferenceProvider
+from .sandbox import ProjectSandboxRunner, execution_readiness
 
 
 PERSONA = """You are ASTRA: Adaptive Scientific Thinking, Reasoning & Autonomy, a DPN Technology research companion inspired by the character in The Diesel Paradox.
@@ -22,6 +23,7 @@ class AstraCore:
         self.provider = provider
         self.archive = archive
         self.repository = repository
+        self.sandbox = ProjectSandboxRunner(repository) if repository is not None else None
         self.project_key = (
             hashlib.sha256(os.fsencode(os.path.normcase(str(repository.root)))).hexdigest()
             if repository is not None else ""
@@ -98,5 +100,10 @@ class AstraCore:
                     "execute": self.repository is not None and self.repository.permissions.execute,
                 },
             },
+            "coding_execution": (
+                self.sandbox.readiness()
+                if self.sandbox is not None
+                else execution_readiness()
+            ),
             "security": {"listen_address": "127.0.0.1", "remote_actions": False, "conversation_persistence": False},
         }

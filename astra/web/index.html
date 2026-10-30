@@ -69,13 +69,26 @@
             <input id="project-search-input" maxlength="200" placeholder="Search source and configuration">
             <button class="ghost" type="submit">Search</button>
           </form>
+          <section class="change-workbench">
+            <span class="eyebrow">FIXED TEST PROFILE / LOCAL SANDBOX</span>
+            <button id="project-test-run" class="ghost" type="button" disabled>Run unit tests in sandbox</button>
+            <button id="project-test-cancel" class="ghost" type="button" disabled>Cancel active sandbox run</button>
+            <p id="project-sandbox-status" class="notice" role="status">Checking the pinned offline runner…</p>
+            <pre id="project-sandbox-output" class="change-diff" aria-label="Latest sandbox test output"></pre>
+            <div class="change-history-head">
+              <span class="eyebrow">SANDBOX RUN HISTORY / METADATA ONLY</span>
+              <button id="project-sandbox-history-refresh" class="ghost" type="button">Refresh</button>
+            </div>
+            <p id="project-sandbox-history-status" class="notice">No test run has been requested.</p>
+            <ul id="project-sandbox-history" class="memorylist" aria-live="polite"></ul>
+          </section>
           <button id="project-dependencies" class="ghost" type="button">Inspect Python imports</button>
           <p id="project-dependencies-status" class="notice" aria-live="polite">Read-only dependency overview; no project code is executed.</p>
           <ul id="project-dependencies-results" class="memorylist" aria-live="polite"></ul>
           <button id="project-validate-all" class="ghost" type="button">Validate project syntax</button>
           <p id="project-validation-summary" class="notice" aria-live="polite">Checks eligible Python, JSON, and TOML files without executing project code.</p>
           <ul id="project-validation-results" class="memorylist" aria-live="polite"></ul>
-          <p id="project-search-status" class="notice">Source search is read-only. Any file change requires a reviewed diff and separate confirmation. Commands are never executed.</p>
+          <p id="project-search-status" class="notice">Source search is read-only. File changes require a reviewed diff and separate confirmation. Test execution is limited to the separately confirmed sandbox profile above.</p>
           <div id="project-search-results" class="memorylist" aria-live="polite"></div>
           <section class="change-workbench">
             <span class="eyebrow">CHANGE REVIEW / USER APPROVAL REQUIRED</span>

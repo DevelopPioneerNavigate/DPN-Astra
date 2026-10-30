@@ -95,8 +95,11 @@ class OllamaProvider:
                 "error": str(exc),
             }
 
-    def chat(self, messages: list[ChatMessage]) -> str:
-        payload = json.dumps({"model": self.model, "messages": messages, "stream": False, "options": {"temperature": 0.65}}).encode("utf-8")
+    def chat(self, messages: list[ChatMessage], *, json_mode: bool = False) -> str:
+        body: dict[str, object] = {"model": self.model, "messages": messages, "stream": False, "options": {"temperature": 0.65}}
+        if json_mode:
+            body["format"] = "json"
+        payload = json.dumps(body).encode("utf-8")
         request = Request(self.base_url + "/api/chat", data=payload, headers={"Content-Type": "application/json"}, method="POST")
         data = self._request_json(request, timeout=120)
         message = data.get("message")

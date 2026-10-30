@@ -2,13 +2,14 @@
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 import os
 from pathlib import Path
 import sqlite3
 
 
 ZERO_HASH = "0" * 64
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class ProjectAuditLog:
@@ -30,7 +31,7 @@ class ProjectAuditLog:
         try:
             db.execute("BEGIN IMMEDIATE")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, SCHEMA_VERSION):
+            if version not in (0, 1, 2, 3, SCHEMA_VERSION):
                 raise RuntimeError(f"Unsupported project audit schema version: {version}")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS project_change_events (
@@ -84,6 +85,27 @@ class ProjectAuditLog:
             db.execute(
                 """CREATE INDEX IF NOT EXISTS drafting_task_checkpoint_order
                    ON drafting_task_checkpoints (project_key, sequence DESC)"""
+            )
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS sandbox_run_events (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_key TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    profile TEXT NOT NULL,
+                    image_digest TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    exit_code INTEGER,
+                    duration_ms INTEGER NOT NULL,
+                    output_truncated INTEGER NOT NULL,
+                    previous_hash TEXT NOT NULL,
+                    event_hash TEXT NOT NULL,
+                    UNIQUE (project_key, run_id)
+                )"""
+            )
+            db.execute(
+                """CREATE INDEX IF NOT EXISTS sandbox_run_event_order
+                   ON sandbox_run_events (project_key, sequence DESC)"""
             )
             db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             db.commit()
@@ -268,6 +290,118 @@ class ProjectAuditLog:
         finally:
             db.close()
 
+    def append_sandbox_run(self, *, run_id, profile, image_digest, state,
+                           exit_code, duration_ms, output_truncated):
+        if not self.project_key:
+            raise ValueError("Sandbox run records require a configured project identity")
+        if profile != "unit_tests" or state not in {
+            "completed", "failed", "timed_out", "cancelled", "runner_error",
+        }:
+            raise ValueError("Invalid sandbox run metadata")
+        if not isinstance(run_id, str) or not re.fullmatch(r"[a-f0-9]{32}", run_id):
+            raise ValueError("Invalid sandbox run ID")
+        if (
+            not isinstance(image_digest, str)
+            or not re.fullmatch(r"sha256:[a-f0-9]{64}", image_digest)
+        ):
+            raise ValueError("Invalid sandbox image digest")
+        if exit_code is not None and type(exit_code) is not int:
+            raise ValueError("Sandbox run exit code must be an integer or null")
+        if type(duration_ms) is not int or duration_ms < 0:
+            raise ValueError("Sandbox run duration must be a non-negative integer")
+        if type(output_truncated) is not bool:
+            raise ValueError("Sandbox output-truncated marker must be boolean")
+        db = self._connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            previous = db.execute(
+                """SELECT event_hash FROM sandbox_run_events
+                   WHERE project_key = ? ORDER BY sequence DESC LIMIT 1""",
+                (self.project_key,),
+            ).fetchone()
+            record = {
+                "project_key": self.project_key,
+                "run_id": run_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "profile": profile,
+                "image_digest": image_digest,
+                "state": state,
+                "exit_code": exit_code,
+                "duration_ms": duration_ms,
+                "output_truncated": int(output_truncated),
+                "previous_hash": previous["event_hash"] if previous else ZERO_HASH,
+            }
+            record["event_hash"] = self._sandbox_run_hash(record)
+            db.execute(
+                """INSERT INTO sandbox_run_events
+                   (project_key, run_id, timestamp, profile, image_digest, state,
+                    exit_code, duration_ms, output_truncated, previous_hash, event_hash)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                tuple(record[key] for key in (
+                    "project_key", "run_id", "timestamp", "profile", "image_digest",
+                    "state", "exit_code", "duration_ms", "output_truncated",
+                    "previous_hash", "event_hash",
+                )),
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def sandbox_runs(self, limit=100) -> dict:
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("Sandbox run limit must be between 1 and 100")
+        db = self._connect()
+        try:
+            cursor = db.execute(
+                """SELECT sequence, project_key, run_id, timestamp, profile, image_digest, state,
+                          exit_code, duration_ms, output_truncated, previous_hash, event_hash
+                   FROM sandbox_run_events WHERE project_key = ?
+                   ORDER BY sequence ASC""",
+                (self.project_key,),
+            )
+            total = db.execute(
+                "SELECT COUNT(*) FROM sandbox_run_events WHERE project_key = ?",
+                (self.project_key,),
+            ).fetchone()[0]
+            events = []
+            previous_hash = ZERO_HASH
+            valid = True
+            checked = 0
+            first_invalid_sequence = None
+            for row in cursor:
+                record = dict(row)
+                events.append({
+                    key: value for key, value in record.items()
+                    if key != "project_key"
+                })
+                if len(events) > limit:
+                    events.pop(0)
+                if not valid:
+                    continue
+                if (
+                    record["previous_hash"] != previous_hash
+                    or record["event_hash"] != self._sandbox_run_hash(record)
+                ):
+                    valid = False
+                    first_invalid_sequence = record["sequence"]
+                    continue
+                previous_hash = record["event_hash"]
+                checked += 1
+            result = {
+                "events": events,
+                "total": total,
+                "truncated": total > len(events),
+                "integrity": {"valid": valid, "checked": checked},
+            }
+            if first_invalid_sequence is not None:
+                result["integrity"]["first_invalid_sequence"] = first_invalid_sequence
+            return result
+        finally:
+            db.close()
+
     def verify(self):
         db = self._connect()
         try:
@@ -305,6 +439,19 @@ class ProjectAuditLog:
             for key in (
                 "sequence", "timestamp", "event", "proposal_id", "path", "state",
                 "original_sha256", "proposed_sha256", "previous_hash",
+            )
+        }
+        serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _sandbox_run_hash(record: dict) -> str:
+        payload = {
+            key: record[key]
+            for key in (
+                "project_key", "run_id", "timestamp", "profile", "image_digest",
+                "state", "exit_code", "duration_ms", "output_truncated",
+                "previous_hash",
             )
         }
         serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)

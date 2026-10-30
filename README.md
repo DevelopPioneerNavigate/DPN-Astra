@@ -43,6 +43,46 @@ ASTRA does **not** claim sentience, genuine emotion, autonomously acting hardwar
 
 No extra Python packages or cloud AI API key are required. Performance depends on the model and your local hardware.
 
+### Verify local inference and recover setup failures
+
+Installing Ollama does not install a model. Model installation downloads
+third-party weights from the Ollama registry; review the model's license and
+ensure sufficient disk space first. The default `llama3.2` is the approximately
+2 GB, 3.2B-parameter Q4_K_M model, subject to Meta's Llama 3.2 Community License
+and acceptable-use policy. These are not DPN-trained or DPN-owned weights.
+Once downloaded, local inference does not require a cloud inference account.
+
+On Windows, if `ollama` is not on the current terminal's PATH:
+
+```powershell
+$ollama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
+& $ollama list
+& $ollama pull llama3.2
+```
+
+If a pull fails with `open ...\.ollama\id_ed25519: The system cannot find the
+file specified`, quit and relaunch the Ollama application, then retry the pull.
+If you started `ollama serve` manually, stop that instance and restart it instead.
+Do not delete the model/data directory or copy private keys into ASTRA.
+Restarting Ollama interrupts active inference; check for running work first.
+
+With ASTRA running, verify the actual service and model rather than relying on
+the presence of an executable:
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:8766/api/status"
+Invoke-RestMethod "http://127.0.0.1:8766/health/ready"
+Invoke-RestMethod "http://127.0.0.1:8766/api/chat" -Method Post `
+  -ContentType "application/json" `
+  -Body '{"message":"What is 17 times 19?","session":"local-smoke-test"}'
+```
+
+Readiness requires both a reachable Ollama service and the configured installed
+model. A real chat response verifies the inference path, not general reasoning
+or coding quality. Clearing that test session uses the normal clear-history API;
+chat is not automatically saved to Archive. Keep both services loopback-only.
+This desktop setup is not an independent production server deployment.
+
 ### Consented memory foundation
 
 The Archive saves only deliberately submitted entries, not conversations. The console
@@ -179,16 +219,48 @@ All variables are optional:
 | `ASTRA_PORT` | `8766` | Local console port |
 | `ASTRA_DATA_DIR` | `~/.dpn-astra` | Persistent local data directory; created on startup (new POSIX directories request mode `0700`) |
 | `ASTRA_PROJECT_DIR` | unset | Opt-in project root for bounded, read-only source context |
+| `ASTRA_PROJECT_EXECUTE` | `false` | Explicit opt-in for the single fixed, sandboxed unit-test profile |
 
 Example PowerShell:
 
 ```powershell
 $env:ASTRA_MODEL="qwen2.5:7b"
 $env:ASTRA_PROJECT_DIR="C:\path\to\your\project"
+# Optional; still requires a separate confirmation in the Project Inspector.
+$env:ASTRA_PROJECT_EXECUTE="true"
 py -3 run_astra.py
 ```
 
-When `ASTRA_PROJECT_DIR` is set, each chat request searches a bounded set of source and configuration files in that directory and adds relevant excerpts with relative paths and line numbers to the local model prompt. The Project Inspector also provides ranked source search and a file metadata index. Search parses eligible Python files without executing them and returns matching class/function/async-function definitions and module/class-level assignments with qualified names and line ranges, AST-detected calls to queried names with containing scope and line/column locations, class inheritance declarations matching queried base names, and imports matching queried names. Imports are resolved only when a matching Python module exists in the indexed project; the UI links to a matching top-level exported definition when identified, or labels a module-only result as a module. The inspector also lists up to 100 lexical uses of an imported alias in its importing file and makes those locations clickable. These name matches can be shadowed by a local binding; they are not semantic resolution. External/unresolved imports are explicitly left unresolved. Python AST analysis is additionally capped at 50,000 nodes and a depth of 200 per file; files beyond either cap are skipped for AST navigation with a warning, but remain eligible for text search. These are static syntax-based navigation results, not a complete reference index or call graph: dynamic dispatch, alias resolution, and runtime behavior are not determined. Function-local assignments are intentionally not listed. Invalid Python files are omitted from symbol, call-site, inheritance, and import results while remaining available as text-search results. Its change workbench loads an existing small UTF-8 file, stages a reviewable diff, and only writes after a separate explicit confirmation. Supported Python, JSON, and TOML proposals must pass static syntax validation before they can be staged; this does not establish semantic or runtime correctness. Project-wide checks return summary counts and at most 100 diagnostics; selecting a syntax diagnostic opens its source file at the reported line. Changes can be rolled back during the current process lifetime if the file has not changed since application. Static syntax checks validate the current editor text or the bounded project inventory without executing project code. This is not automatic model editing or a test runner: the user supplies/reviews replacement contents, and project commands/tests are not executed. The index excludes common dependency/build directories and credential-named files, redacts common secret assignments, and enforces directory-entry, file-count and byte limits. Review the files in your project and do not treat these safeguards as a guarantee that arbitrary source contains no secrets. Relevant excerpts are sent to the configured loopback Ollama service. The console indicates whether project context is enabled.
+When `ASTRA_PROJECT_DIR` is set, each chat request searches a bounded set of source and configuration files in that directory and adds relevant excerpts with relative paths and line numbers to the local model prompt. The Project Inspector also provides ranked source search and a file metadata index. Search parses eligible Python files without executing them and returns matching class/function/async-function definitions and module/class-level assignments with qualified names and line ranges, AST-detected calls to queried names with containing scope and line/column locations, class inheritance declarations matching queried base names, and imports matching queried names. Imports are resolved only when a matching Python module exists in the indexed project; the UI links to a matching top-level exported definition when identified, or labels a module-only result as a module. The inspector also lists up to 100 lexical uses of an imported alias in its importing file and makes those locations clickable. These name matches can be shadowed by a local binding; they are not semantic resolution. External/unresolved imports are explicitly left unresolved. Python AST analysis is additionally capped at 50,000 nodes and a depth of 200 per file; files beyond either cap are skipped for AST navigation with a warning, but remain eligible for text search. These are static syntax-based navigation results, not a complete reference index or call graph: dynamic dispatch, alias resolution, and runtime behavior are not determined. Function-local assignments are intentionally not listed. Invalid Python files are omitted from symbol, call-site, inheritance, and import results while remaining available as text-search results. Its change workbench loads an existing small UTF-8 file, stages a reviewable diff, and only writes after a separate explicit confirmation. Supported Python, JSON, and TOML proposals must pass static syntax validation before they can be staged; this does not establish semantic or runtime correctness. Project-wide checks return summary counts and at most 100 diagnostics; selecting a syntax diagnostic opens its source file at the reported line. Changes can be rolled back during the current process lifetime if the file has not changed since application. Static syntax checks validate the current editor text or the bounded project inventory without executing project code. The only execution capability is the separately enabled and confirmed fixed unit-test sandbox described below; no arbitrary commands are accepted. The index excludes common dependency/build directories and credential-named files, redacts common secret assignments, and enforces directory-entry, file-count and byte limits. Review the files in your project and do not treat these safeguards as a guarantee that arbitrary source contains no secrets. Relevant excerpts are sent to the configured loopback Ollama service. The console indicates whether project context is enabled.
+
+### Fixed-profile sandbox tests
+
+The Project Inspector's **Run unit tests in sandbox** control is available only
+when `ASTRA_PROJECT_DIR` is set, `ASTRA_PROJECT_EXECUTE=true`, persistent audit
+storage is configured, and the pinned local Podman runtime/image checks pass.
+Each run also requires a separate confirmation. ASTRA accepts only the fixed
+Python unittest-discovery profile (equivalent to
+`python -m unittest discover -s tests -q`); the API rejects extra command fields
+and offers no shell, arbitrary arguments, build, install, or network
+access. The project is mounted read-only in a disposable Python 3.12 container
+with networking disabled, an unprivileged UID, all Linux capabilities dropped,
+no-new-privileges, read-only root filesystem, a no-exec temporary filesystem,
+CPU/process limits, and a 180-second wall timeout. An in-container preflight
+checks those runtime properties before discovering tests. Captured output is
+limited to 64 KiB and is displayed only for that request. A separate confirmed
+**Cancel active sandbox run** action terminates the runner process; the request
+thread then removes the disposable container and records a `cancelled` outcome.
+
+On the verified Windows setup, the rootless WSL Podman VM is limited to 2 CPUs
+and 4 GiB RAM. Rootless Podman does not expose a verified per-container memory
+limit in this configuration; **the VM limit is not a per-container memory cap**.
+The image is pinned by digest and must already exist locally; ASTRA will not pull
+it during a run. Tests can still consume resources within the stated VM limits
+and can have side effects in their temporary container. Only run tests for source
+you trust. A run's persistent, project-scoped audit record contains metadata and
+the image digest, not test output or source. Its hash chain is tamper-evident
+only, not authenticated. A passing test run is evidence for that fixed suite at
+that time, not proof of overall correctness or completion of the master issue.
 
 The HTTP service remains loopback-only. `GET /health/live` reports process liveness without requiring Ollama; `GET /health/ready` checks Ollama connectivity and configured model availability, returning HTTP 503 until both are true. Both endpoints retain the local Host-header check. These probes are for local service supervision, not remote monitoring or an authenticated management API.
 
@@ -409,9 +481,22 @@ metadata, not a correctness check, permission grant, or guarantee that the file
 will remain unchanged. After restart, inspecting a checkpoint still cannot restore
 Apply/Rollback controls or lost rollback bytes.
 
+Repository evidence lookup accepts the full 4,000-character chat message or
+draft instruction, including matching terms near its end. It does not truncate
+the instruction sent to the model. The Project Inspector's explicit search API
+retains its separate 200-character query limit. Existing file-count, byte,
+excerpt, and context-output limits apply to both paths.
+
 ### Local inference boundary
 
 CORE consumes the typed `InferenceProvider` contract in `astra/inference.py`: adapter identity, selected model, health, and role-tagged chat messages. The shared `ModelError` represents failed inference, not an answer. Ollama remains the only production adapter; this contract does not install models, route tasks, or add llama.cpp/vLLM support.
+
+Adapters also accept the optional keyword-only `json_mode` flag. Single-file
+and multi-file drafting request it; the Ollama adapter sends `format: "json"`.
+Ordinary chat keeps the existing free-text request format. JSON mode does not
+establish that a draft is complete or correct: ASTRA still rejects duplicate keys,
+unexpected shapes, oversized content, invalid supported syntax, and stale source
+hashes. It never applies a generated draft without separate approval.
 
 The Ollama adapter validates JSON response shapes, limits each response to 4 MiB, and exposes diagnostic errors in `model_status.error` (also visible in the status-chip tooltip). Missing models are distinguished from unavailable or malformed provider responses. A failed chat returns HTTP 503 without appending fabricated history. Requests stay on the configured loopback HTTP endpoint: environment proxies and HTTP redirects are not used. Health requests use a two-second socket timeout and chat requests a 120-second socket timeout; these are not total wall-clock deadlines.
 
@@ -425,7 +510,7 @@ When `ASTRA_PROJECT_DIR` is enabled, ASTRA stores project-change lifecycle metad
 - Chats exist only in process memory. Explicitly saved facts live in `ASTRA_DATA_DIR/astra_memory.sqlite3`.
 - Stored facts are **not encrypted** in this prototype; do not save secrets or sensitive personal details.
 - A user can view and delete each saved fact. Clearing the chat does not delete saved facts.
-- External commands and infrastructure controls cannot execute. Project writes are limited to reviewed existing text files and require a separate per-change confirmation; rollback is guarded against overwriting intervening edits. The metadata ledger is not an authenticated security boundary. Future integrations require stronger authentication, independently protected audit logs, and physical interlocks.
+- Arbitrary external commands and infrastructure controls cannot execute. The only project-code execution is the fixed, separately confirmed sandbox test profile, disabled by default and isolated as documented above. Project writes are limited to reviewed existing text files and require a separate per-change confirmation; rollback is guarded against overwriting intervening edits. The metadata ledger is not an authenticated security boundary. Future integrations require stronger authentication, independently protected audit logs, and physical interlocks.
 - Browser dictation and speech depend on browser support; dictation is initiated only after clicking Mic.
 - No unattended agent loop is enabled.
 

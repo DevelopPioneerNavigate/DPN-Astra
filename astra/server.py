@@ -12,6 +12,7 @@ from .project_validation import ProjectSyntaxError
 from .project_changes import ProjectDraftConflict
 from .project_drafting import ProjectDrafting
 from .drafting_tasks import DraftingTasks
+from .sandbox import SandboxBusy, SandboxNotRunning, SandboxUnavailable
 
 WEB_DIR = Path(__file__).parent / "web"
 ASSETS = {"/": ("index.html", "text/html; charset=utf-8"), "/app.css": ("app.css", "text/css; charset=utf-8"), "/project.css": ("project.css", "text/css; charset=utf-8"), "/app.js": ("app.js", "application/javascript; charset=utf-8")}
@@ -124,6 +125,23 @@ def make_handler(core: AstraCore):
                     self._send(404, {"error": "Read-only project context is not enabled"})
                     return
                 self._send(200, core.repository.files())
+            elif url.path == "/api/project/sandbox":
+                if core.sandbox is None:
+                    self._send(404, {"error": "Project sandbox is not configured"})
+                    return
+                self._send(200, core.sandbox.readiness())
+            elif url.path == "/api/project/sandbox-runs":
+                if core.repository is None:
+                    self._send(404, {"error": "Project context is not enabled"})
+                    return
+                audit = core.repository.changes.audit_store
+                if audit is None:
+                    self._send(503, {"error": "Persistent sandbox run history is unavailable"})
+                    return
+                try:
+                    self._send(200, audit.sandbox_runs())
+                except sqlite3.Error:
+                    self._send(503, {"error": "Persistent sandbox run history is unavailable"})
             elif url.path == "/api/project/search":
                 if core.repository is None:
                     self._send(404, {"error": "Read-only project context is not enabled"})
@@ -232,128 +250,171 @@ def make_handler(core: AstraCore):
             else:
                 self._send(404, {"error": "Not found"})
 
+        def _post_memory_request(self, path, body):
+            if path == "/api/chat":
+                reply = core.chat(body.get("message"), body.get("session", "default"))
+                self._send(200, {"reply": reply})
+            elif path == "/api/memories":
+                self._send(201, {"memory": core.archive.remember(
+                    body.get("note"),
+                    kind=body.get("kind", "note"),
+                    source=body.get("source", ""),
+                    project_key=self._memory_scope(body.get("scope", "global")),
+                )})
+            elif path == "/api/memories/export":
+                exported = core.archive.export_json()
+                self._headers(
+                    200, "application/json; charset=utf-8", len(exported),
+                    download_name="astra-memories.json",
+                )
+                self.wfile.write(exported)
+            elif path.startswith("/api/memories/"):
+                parts = path.strip("/").split("/")
+                if len(parts) != 4 or parts[3] != "edit":
+                    self._send(404, {"error": "Not found"})
+                    return True
+                self._send(200, {"memory": core.archive.edit(
+                    int(parts[2]), body.get("note"), revision=body.get("revision"),
+                    kind=body.get("kind", "note"), source=body.get("source", ""),
+                    project_key=self._memory_scope(body.get("scope", "global")),
+                )})
+            elif path == "/api/history/clear":
+                core.clear_history(body.get("session", "default"))
+                self._send(200, {"cleared": True})
+            else:
+                return False
+            return True
+
+        def _post_project_drafting(self, path, body):
+            if path == "/api/project/draft-tasks":
+                if drafting_tasks is None:
+                    self._send(404, {"error": "Project context is not enabled"})
+                    return True
+                self._send(202, {"task": drafting_tasks.start(
+                    body.get("paths"), body.get("instruction"), confirmed=body.get("confirm") is True,
+                    budget_seconds=body.get("budget_seconds", 120),
+                )})
+            elif path.startswith("/api/project/draft-tasks/"):
+                if drafting_tasks is None:
+                    self._send(404, {"error": "Project context is not enabled"})
+                    return True
+                parts = path.strip("/").split("/")
+                if len(parts) != 5 or parts[4] != "cancel":
+                    self._send(404, {"error": "Not found"})
+                    return True
+                try:
+                    self._send(200, {"task": drafting_tasks.cancel(parts[3], confirmed=body.get("confirm") is True)})
+                except LookupError as exc:
+                    self._send(404, {"error": str(exc)})
+            elif path == "/api/project/draft":
+                if drafting is None:
+                    self._send(404, {"error": "Project context is not enabled"})
+                    return True
+                self._send(201, drafting.draft(
+                    body.get("path"), body.get("instruction"), confirmed=body.get("confirm") is True,
+                ))
+            elif path == "/api/project/test-run":
+                if core.sandbox is None:
+                    self._send(404, {"error": "Project sandbox is not configured"})
+                    return True
+                if set(body) != {"confirm", "profile"}:
+                    raise ValueError("Only confirm and the fixed profile identifier are accepted")
+                self._send(200, {"run": core.sandbox.run_tests(
+                    confirmed=body.get("confirm") is True,
+                    profile=body.get("profile"),
+                )})
+            elif path == "/api/project/test-cancel":
+                if core.sandbox is None:
+                    self._send(404, {"error": "Project sandbox is not configured"})
+                    return True
+                if set(body) != {"confirm"}:
+                    raise ValueError("Only a confirmation flag is accepted")
+                self._send(202, {"cancel": core.sandbox.cancel_tests(
+                    confirmed=body.get("confirm") is True,
+                )})
+            elif path == "/api/project/draft-set":
+                if drafting is None:
+                    self._send(404, {"error": "Project context is not enabled"})
+                    return True
+                self._send(201, drafting.draft_many(
+                    body.get("paths"), body.get("instruction"), confirmed=body.get("confirm") is True,
+                ))
+            else:
+                return False
+            return True
+
+        def _post_project_changes(self, path, body):
+            if path == "/api/project/change-set":
+                if core.repository is None:
+                    self._send(404, {"error": "Project context is not enabled"})
+                    return True
+                self._send(201, core.repository.validation.propose_many(body.get("files")))
+            elif path == "/api/project/proposals":
+                if core.repository is None:
+                    self._send(404, {"error": "Read-only project context is not enabled"})
+                    return True
+                self._send(201, core.repository.validation.propose(body.get("path"), body.get("content")))
+            elif path == "/api/project/validate":
+                if core.repository is None:
+                    self._send(404, {"error": "Read-only project context is not enabled"})
+                    return True
+                result = core.repository.validation.validate(
+                    body.get("path"),
+                    content=body.get("content"),
+                )
+                self._send(200, {"validation": result})
+            elif path == "/api/project/validate-all":
+                if core.repository is None:
+                    self._send(404, {"error": "Read-only project context is not enabled"})
+                    return True
+                self._send(200, {"validation": core.repository.validation.validate_project()})
+            elif path.startswith("/api/project/proposals/"):
+                if core.repository is None:
+                    self._send(404, {"error": "Read-only project context is not enabled"})
+                    return True
+                parts = path.strip("/").split("/")
+                if len(parts) != 5 or parts[2] != "proposals" or parts[4] not in {"apply", "rollback"}:
+                    self._send(404, {"error": "Not found"})
+                    return True
+                proposal_id = parts[3]
+                if parts[4] == "apply":
+                    proposal = core.repository.changes.apply(
+                        proposal_id,
+                        confirmed=body.get("confirm") is True,
+                    )
+                else:
+                    proposal = core.repository.changes.rollback(
+                        proposal_id,
+                        confirmed=body.get("confirm") is True,
+                    )
+                self._send(200, {"proposal": proposal})
+            else:
+                return False
+            return True
+
         def do_POST(self):
             if not self._authorized_host(write=True):
                 return
             try:
                 body = self._read_json()
                 path = urlsplit(self.path).path
-                if path == "/api/chat":
-                    reply = core.chat(body.get("message"), body.get("session", "default"))
-                    self._send(200, {"reply": reply})
-                elif path == "/api/memories":
-                    self._send(201, {"memory": core.archive.remember(
-                        body.get("note"),
-                        kind=body.get("kind", "note"),
-                        source=body.get("source", ""),
-                        project_key=self._memory_scope(body.get("scope", "global")),
-                    )})
-                elif path == "/api/memories/export":
-                    exported = core.archive.export_json()
-                    self._headers(
-                        200, "application/json; charset=utf-8", len(exported),
-                        download_name="astra-memories.json",
-                    )
-                    self.wfile.write(exported)
-                elif path.startswith("/api/memories/"):
-                    parts = path.strip("/").split("/")
-                    if len(parts) != 4 or parts[3] != "edit":
-                        self._send(404, {"error": "Not found"})
-                        return
-                    self._send(200, {"memory": core.archive.edit(
-                        int(parts[2]), body.get("note"), revision=body.get("revision"),
-                        kind=body.get("kind", "note"), source=body.get("source", ""),
-                        project_key=self._memory_scope(body.get("scope", "global")),
-                    )})
-                elif path == "/api/history/clear":
-                    core.clear_history(body.get("session", "default"))
-                    self._send(200, {"cleared": True})
-                elif path == "/api/project/draft-tasks":
-                    if drafting_tasks is None:
-                        self._send(404, {"error": "Project context is not enabled"})
-                        return
-                    self._send(202, {"task": drafting_tasks.start(
-                        body.get("paths"), body.get("instruction"), confirmed=body.get("confirm") is True,
-                        budget_seconds=body.get("budget_seconds", 120),
-                    )})
-                elif path.startswith("/api/project/draft-tasks/"):
-                    if drafting_tasks is None:
-                        self._send(404, {"error": "Project context is not enabled"})
-                        return
-                    parts = path.strip("/").split("/")
-                    if len(parts) != 5 or parts[4] != "cancel":
-                        self._send(404, {"error": "Not found"})
-                        return
-                    try:
-                        self._send(200, {"task": drafting_tasks.cancel(parts[3], confirmed=body.get("confirm") is True)})
-                    except LookupError as exc:
-                        self._send(404, {"error": str(exc)})
-                elif path == "/api/project/draft":
-                    if drafting is None:
-                        self._send(404, {"error": "Project context is not enabled"})
-                        return
-                    result = drafting.draft(
-                        body.get("path"), body.get("instruction"), confirmed=body.get("confirm") is True,
-                    )
-                    self._send(201, result)
-                elif path == "/api/project/draft-set":
-                    if drafting is None:
-                        self._send(404, {"error": "Project context is not enabled"})
-                        return
-                    self._send(201, drafting.draft_many(
-                        body.get("paths"), body.get("instruction"), confirmed=body.get("confirm") is True,
-                    ))
-                elif path == "/api/project/change-set":
-                    if core.repository is None:
-                        self._send(404, {"error": "Project context is not enabled"})
-                        return
-                    self._send(201, core.repository.validation.propose_many(body.get("files")))
-                elif path == "/api/project/proposals":
-                    if core.repository is None:
-                        self._send(404, {"error": "Read-only project context is not enabled"})
-                        return
-                    result = core.repository.validation.propose(body.get("path"), body.get("content"))
-                    self._send(201, result)
-                elif path == "/api/project/validate":
-                    if core.repository is None:
-                        self._send(404, {"error": "Read-only project context is not enabled"})
-                        return
-                    result = core.repository.validation.validate(
-                        body.get("path"),
-                        content=body.get("content"),
-                    )
-                    self._send(200, {"validation": result})
-                elif path == "/api/project/validate-all":
-                    if core.repository is None:
-                        self._send(404, {"error": "Read-only project context is not enabled"})
-                        return
-                    self._send(200, {"validation": core.repository.validation.validate_project()})
-                elif path.startswith("/api/project/proposals/"):
-                    if core.repository is None:
-                        self._send(404, {"error": "Read-only project context is not enabled"})
-                        return
-                    parts = path.strip("/").split("/")
-                    if len(parts) != 5 or parts[2] != "proposals" or parts[4] not in {"apply", "rollback"}:
-                        self._send(404, {"error": "Not found"})
-                        return
-                    proposal_id = parts[3]
-                    if parts[4] == "apply":
-                        proposal = core.repository.changes.apply(
-                            proposal_id,
-                            confirmed=body.get("confirm") is True,
-                        )
-                    else:
-                        proposal = core.repository.changes.rollback(
-                            proposal_id,
-                            confirmed=body.get("confirm") is True,
-                        )
-                    self._send(200, {"proposal": proposal})
-                else:
+                handled = (
+                    self._post_memory_request(path, body)
+                    or self._post_project_drafting(path, body)
+                    or self._post_project_changes(path, body)
+                )
+                if not handled:
                     self._send(404, {"error": "Not found"})
             except ProjectSyntaxError as exc:
                 self._send(422, {"error": str(exc), "validation": exc.result})
             except ProjectDraftConflict as exc:
                 self._send(409, {"error": str(exc)})
+            except SandboxBusy as exc:
+                self._send(409, {"error": str(exc)})
+            except SandboxNotRunning as exc:
+                self._send(409, {"error": str(exc)})
+            except SandboxUnavailable as exc:
+                self._send(503, {"error": str(exc)})
             except MemoryConflict as exc:
                 self._send(409, {"error": str(exc)})
             except MemoryNotFound as exc:

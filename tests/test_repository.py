@@ -66,6 +66,28 @@ class RepositoryContextTests(unittest.TestCase):
             repository.files()["files"],
         )
 
+    def test_context_uses_terms_beyond_public_search_limit(self):
+        (self.root / "engine.py").write_text("def dispatch_job():\n    return 'queued'\n")
+        query = " " * (4000 - len("dispatch_job")) + "dispatch_job"
+        repository = RepositoryContext(self.root)
+        context = repository.context_for(query)
+        self.assertIn("[engine.py]", context)
+        self.assertIn("1: def dispatch_job():", context)
+        self.assertLessEqual(len(context), 12_000)
+        for invalid in ("x" * 4001, None, []):
+            with self.subTest(query=invalid), self.assertRaises(ValueError):
+                repository.context_for(invalid)
+
+    def test_public_search_keeps_200_character_limit(self):
+        repository = RepositoryContext(self.root)
+        repository.search("x" * 200)
+        for invalid in ("x" * 201, None, []):
+            with self.subTest(query=invalid), self.assertRaisesRegex(ValueError, "200"):
+                repository.search(invalid)
+        repository.permissions = RepositoryPermissions()
+        with self.assertRaises(PermissionError):
+            repository.context_for("x" * 4000)
+
     def test_python_symbol_search_returns_nested_definitions_and_skips_invalid_files(self):
         (self.root / "service.py").write_text(
             "class QueueService:\n"

@@ -72,6 +72,10 @@ class AstraTests(unittest.TestCase):
         self.assertEqual("Test local provider", status["provider"])
         self.assertEqual("disabled", status["modules"]["COMMAND"])
         self.assertFalse(status["project_context"]["enabled"])
+        self.assertFalse(status["coding_execution"]["enabled"])
+        self.assertFalse(status["coding_execution"]["isolation_verified"])
+        self.assertEqual("unavailable", status["coding_execution"]["status"])
+        self.assertFalse(status["coding_execution"]["permission_configured"])
         self.assertFalse(status["security"]["remote_actions"])
 
     def test_config_rejects_remote_model(self):
@@ -79,6 +83,17 @@ class AstraTests(unittest.TestCase):
         with patch.dict("os.environ", {"ASTRA_OLLAMA_URL": "http://remote.example:11434"}):
             with self.assertRaises(ValueError):
                 Config.from_env()
+
+    def test_project_execution_requires_explicit_strict_opt_in(self):
+        from unittest.mock import patch
+        with patch.dict("os.environ", {"ASTRA_PROJECT_EXECUTE": "false"}):
+            self.assertFalse(Config.from_env().project_execute)
+        with patch.dict("os.environ", {"ASTRA_PROJECT_EXECUTE": "true"}):
+            self.assertTrue(Config.from_env().project_execute)
+        for invalid in ("1", "yes", "enabled"):
+            with patch.dict("os.environ", {"ASTRA_PROJECT_EXECUTE": invalid}):
+                with self.assertRaisesRegex(ValueError, "exactly true or false"):
+                    Config.from_env()
 
     def test_config_prepares_persistent_data_directory(self):
         data_dir = Path(self.tmp.name) / "nested" / "astra-data"
