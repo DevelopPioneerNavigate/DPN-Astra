@@ -999,6 +999,8 @@
       + " / worker " + (task.worker_active ? "active (may be draining)" : "exited")
       + " / acceptance budget " + task.budget_seconds + "s. "
       + (task.error || "No task error recorded.")
+      + (task.checkpoint_error ? " CHECKPOINT ERROR: " + task.checkpoint_error
+        : task.checkpoint_enabled ? " Metadata checkpoint storage enabled." : " No durable task checkpoint storage.")
       + " Transport interruption is unsupported. No project writes or tests executed."
       + (task.result ? " Provider: " + task.result.provider + " / " + task.result.model + "." : "")
       + (task.state === "completed" ? " Load the review explicitly; proposals still expire after 15 minutes or restart." : "");
@@ -1029,6 +1031,43 @@
         + " current-process task(s). Latest 20 retained; no automatic retries or resumption. Select a task and refresh status.";
     } catch (error) {
       $("project-task-status").textContent = "Could not list draft tasks: " + error.message;
+    } finally { button.disabled = false; }
+  });
+
+  $("project-task-history").addEventListener("click", async () => {
+    if (reviewSetBusy) return;
+    const button = $("project-task-history");
+    const status = $("project-task-history-status");
+    button.disabled = true;
+    status.textContent = "Reading recorded task metadata...";
+    try {
+      const report = await api("/api/project/draft-task-history");
+      const list = $("project-task-history-results");
+      list.replaceChildren();
+      for (const record of report.checkpoints) {
+        const item = document.createElement("li");
+        const continuity = record.continuity === "current_process"
+          ? "current-process task; use Find/Refresh for live status"
+          : record.continuity === "historical_unverified"
+            ? "interrupted or unobserved worker; final outcome unknown"
+            : "historical recorded outcome; no live task restored";
+        item.textContent = record.task_id + " / " + record.paths.join(", ")
+          + " / recorded " + record.state + " / " + continuity
+          + " / created " + record.created_at + " / checkpoint " + record.updated_at
+          + " / budget " + record.budget_seconds + "s"
+          + (record.outcome_code ? " / " + record.outcome_code : "")
+          + (record.proposal_ids.length ? " / recorded proposal IDs: " + record.proposal_ids.join(", ") : "");
+        list.append(item);
+      }
+      status.textContent = (report.durable ? "Persistent" : "No persistent")
+        + " task checkpoint storage. " + report.total + " record(s). "
+        + (report.truncated ? "Showing newest 100 tasks. " : "")
+        + "Metadata only; unauthenticated and possibly stale. Recorded completion means staging, not Apply or test success."
+        + " Unknown outcomes require file inspection. Nothing is resumed or authorized.";
+    } catch (error) {
+      $("project-task-history-results").replaceChildren();
+      status.textContent = "Task checkpoint history failed: " + error.message
+        + ". No verified history is available; no task was resumed.";
     } finally { button.disabled = false; }
   });
 

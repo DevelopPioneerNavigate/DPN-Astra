@@ -160,6 +160,14 @@ def make_handler(core: AstraCore):
                     self._send(200, core.repository.changes.audit_log())
                 except OSError as exc:
                     self._send(500, {"error": f"Project audit log unavailable: {exc.strerror or str(exc)}"})
+            elif url.path == "/api/project/draft-task-history":
+                if drafting_tasks is None:
+                    self._send(404, {"error": "Project context is not enabled"})
+                    return
+                try:
+                    self._send(200, drafting_tasks.history())
+                except (sqlite3.Error, OSError, ValueError):
+                    self._send(503, {"error": "Draft task checkpoint history unavailable or invalid"})
             elif url.path == "/api/project/draft-tasks":
                 if drafting_tasks is None:
                     self._send(404, {"error": "Project context is not enabled"})

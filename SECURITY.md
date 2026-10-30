@@ -126,11 +126,36 @@ Once staging acceptance wins the task lock, cancellation cannot undo it. There i
 no thread killing, automatic retry, compensation, or project command execution.
 Cancelled/timed-out workers retain their slot until they exit.
 
-Latest 20 task records/results are retained in RAM; restart loses them and no task
-auto-resumes. Finished output remains subject to proposal expiry and separately
+Latest 20 live task records/results are retained in RAM; restart loses actionable
+tasks and no task auto-resumes. Finished output remains subject to proposal expiry and separately
 confirmed Apply. Instructions/source are transient worker input, not a durable
 task journal. Failures are explicitly reported and logged with task ID. A lost
 start/cancel response must be reconciled via Find/Refresh, not blindly retried.
+
+### Persistent task metadata
+
+Audit schema v3 stores project-scoped task metadata only: IDs, relative target paths,
+timestamps, budget, last recorded phase/worker flag, fixed outcome code and proposal
+IDs. Instructions, source, diffs, full output and arbitrary exception text are
+excluded. `GET /api/project/draft-task-history` retains Host checks and returns at
+most 100 newest tasks with count/truncation. There is no new write/execute privilege
+and historical entries cannot rehydrate live tasks or authorize mutations.
+
+Per-handler owner IDs distinguish current-process tasks from historical records;
+these IDs are not credentials, leases or cross-process locks. An active checkpoint
+from an unobserved handler is marked unknown, not automatically failed/cancelled or
+resumed. Multiple application processes are not coordinated by this mechanism.
+The metadata table is plaintext, unauthenticated and outside event-chain verification.
+It has no retention limit beyond bounded retrieval and is not included in memory
+snapshots.
+
+Checkpoint persistence fails closed before worker launch, at phase transitions and
+before staging. A cancellation/timeout remains effective even if its checkpoint
+write fails. Failure to record terminal completion cannot undo staged proposals:
+live status exposes a checkpoint error while preserving the completed review result.
+Task and proposal staging are not one atomic transaction. A crash or failed write
+can leave historical metadata stale; inspect actual files and review checkpoints.
+No automatic retry, task restoration or recovery authority is granted.
 
 ## Review checkpoints
 

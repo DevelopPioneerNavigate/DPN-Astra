@@ -61,6 +61,10 @@ class ProjectChanges:
         ) if audit_path is not None else None
         self._lock = RLock()
 
+    @property
+    def audit_store(self) -> ProjectAuditLog | None:
+        return self._audit_log
+
     def read_file(self, relative_path: str) -> dict:
         self.permissions.require_read()
         target, display_path = self._resolve_target(relative_path)

@@ -319,8 +319,8 @@ accepted staging/audit operation are not forcibly interrupted. Cancellation is
 serialized against validation/staging acceptance; if staging wins, cancellation
 reports completed rather than pretending the proposals were undone.
 
-Task IDs, phases, errors and result references are RAM-only. Reload can rediscover
-them while the same server process lives; restart cannot. Instructions and source
+Live tasks, detailed errors and review results are RAM-only. Reload can rediscover
+them while the same server process lives; restart cannot restore them. Instructions and source
 are used transiently for the running draft, not persisted as task records. Completed
 task results do not extend proposal expiry or restore lost rollback bytes.
 Failures are reported explicitly and logged; no repair, retry, write or project
@@ -329,6 +329,44 @@ autonomous engineering loop.
 
 The existing synchronous `/api/project/draft-set` endpoint remains available for
 compatibility; the new controls use `/api/project/draft-tasks`.
+
+### Persistent drafting-task checkpoints
+
+With normal project audit storage configured, **Show task checkpoint history**
+reads the newest 100 task metadata records for the configured project, including
+tasks from earlier server processes. It records the task ID, target paths, creation
+and checkpoint times, acceptance budget, last phase, recorded worker activity,
+fixed outcome code, and staged proposal IDs when a completion checkpoint succeeds.
+It does **not** store the instruction, source, replacement content, diff, full
+provider response or exception text. Live detailed errors remain transient.
+
+History distinguishes:
+- **Current process:** use Find/Refresh for actual live status.
+- **Historical recorded outcome:** the last checkpoint recorded worker exit.
+- **Interrupted or unobserved worker:** a prior checkpoint recorded an active
+  worker, but this handler cannot observe its final outcome. A second running
+  ASTRA process is also unobserved; history does not assert that it stopped.
+
+Historical entries have no task execution, Cancel, Load or Apply actions. Nothing
+auto-resumes, regenerates or restores proposal/rollback bytes. Recorded completion
+means a draft was staged, not applied or tested. Staging and task checkpoint writes
+are separate transactions: after a crash or storage failure, the last task phase
+may be stale even if proposals were staged. Use review checkpoints and file
+inspection to investigate; do not infer success or failure from an unknown outcome.
+
+Audit schema v3 adds the task metadata table transactionally, preserving existing
+events, hashes and review checkpoints. Initial/phase/pre-staging storage failures
+prevent further generation/staging and are reported. Cancellation still takes
+effect if its checkpoint cannot be saved. If final persistence fails after staging,
+the completed live result remains available with a **checkpoint error** warning.
+No automatic checkpoint retry is performed.
+
+Metadata is plaintext, unauthenticated, not covered by the event hash chain, and
+has no automatic retention policy. The 100-record display bound does not delete
+older rows. The memory-only snapshot command does not back up this audit database.
+Without audit storage, live task behavior is unchanged and history reports that
+persistent checkpoints are unavailable. This is metadata continuity, not durable
+task execution or crash-safe workflow recovery.
 
 ### Review checkpoints and reload recovery
 

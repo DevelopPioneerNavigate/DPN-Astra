@@ -204,8 +204,9 @@ These are workflow checks, not live-model generation-quality evidence.
 `DraftingTasks` wraps the existing shared `ProjectDrafting` service. One daemon
 worker runs a single approved multi-file generation; it is not an autonomous loop
 and does not outlive the application process. At most 20 task records/results are
-retained, with oldest inactive records evicted on capacity. No task records are
-written to SQLite and no task auto-resumes after restart.
+retained, with oldest inactive records evicted on capacity. Minimal metadata
+checkpoints are separately stored when audit storage is configured (below);
+no actionable task or review result is restored and no task auto-resumes after restart.
 
 Routes:
 - `POST /api/project/draft-tasks`: `paths`, `instruction`, literal `confirm: true`,
@@ -241,6 +242,43 @@ proposal IDs remain available before replacing the visible set. Task discovery
 supports a browser reload or lost start response; it does not restore tasks after
 server restart or extend proposal/rollback expiry. No tests/builds are executed,
 no task result auto-applies, and no retry/repair/scheduling loop is implemented.
+
+### Persistent task metadata checkpoints
+
+Audit schema v3 adds `drafting_task_checkpoints` in the same `BEGIN IMMEDIATE`
+migration used for audit/review schemas. Earlier events/hashes and review rows
+remain intact. Rows are keyed by project identity and task ID, ordered by an
+immutable creation sequence, and updated in one SQLite transaction per checkpoint.
+Stored fields are limited to task/handler IDs, paths, creation/update timestamps,
+budget, state, worker flag, fixed outcome code and proposal IDs. No instructions,
+source, replacements, diff, provider reply or exception text is persisted here.
+
+`ProjectChanges.audit_store` exposes the configured scoped audit store to
+`DraftingTasks`. It writes queued metadata before worker launch, checkpoints phase
+transitions, records `staging` before invoking validation/staging, and records the
+final outcome after worker exit. Required writes propagate storage errors, preventing
+further work. Best-effort stop/final writes log errors and expose `checkpoint_error`
+without undoing cancellation or discarding completed actionable results. Successful
+later transitions can replace a stale checkpoint; there is no automatic retry loop.
+`durable: false` on live status still means the task itself is RAM-only;
+`checkpoint_enabled` and `checkpoint_error` separately describe metadata storage.
+
+`GET /api/project/draft-task-history` returns newest 100 records/count/truncation
+from one read transaction, scoped before limiting. It strips owner IDs and reports
+`current_process`, `historical_finished`, or `historical_unverified`, plus
+`recorded_worker_active`, `task_available` and `metadata_only: true`. Another handler
+may still be running; startup does not overwrite its records or claim its worker
+was terminated. This is not a lease/heartbeat or multi-process coordinator.
+Missing context returns 404; storage or invalid stored JSON metadata returns 503.
+
+The UI renders history as text-only records without mutation/resume controls and
+removes stale displayed records on fetch failure. A recorded completion means
+review staging, not application or test success. Proposal staging and task writes
+are separate transactions, so a last `staging` record may conceal successful staging
+after a crash/final-save failure. Review metadata and actual-file inspection remain
+the evidence sources; history never recreates authority, rollback bytes or tasks.
+These plaintext records are not covered by the event hash chain, have no automated
+retention, and are not backed up by the memory-only snapshot command.
 
 ## Bounded multi-file preview
 

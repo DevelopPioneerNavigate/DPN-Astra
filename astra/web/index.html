@@ -122,6 +122,9 @@
               <button id="project-task-load" class="ghost" type="button">Load completed draft review</button>
               <p id="project-task-status" class="notice" role="status">No task selected. Cancellation discards late output; it cannot interrupt an in-flight inference call. Refresh status explicitly; no automatic retry or task resumption.</p>
               <ul id="project-task-list-results" class="memorylist" aria-label="Current-process drafting tasks"></ul>
+              <button id="project-task-history" class="ghost" type="button">Show task checkpoint history</button>
+              <p id="project-task-history-status" class="notice" role="status">Task metadata can survive restart when project audit storage is configured. Historical records do not restore tasks, source, reviews or authorization.</p>
+              <ul id="project-task-history-results" class="memorylist" aria-label="Recorded drafting task checkpoints"></ul>
               <p class="notice">Requires approval to send every selected on-disk file verbatim plus bounded repository evidence to local inference. Review for secrets first. Maximum 48 KiB source total. Drafting only stages diffs; it never applies changes or runs tests.</p>
               <p class="notice">Submit 1-5 existing files as a JSON array of {"path":"sample.py","content":"complete replacement"}. Maximum 48 KiB total UTF-8 content; each file stays within 24 KiB. Preview never writes files. Each Apply is independent: a partially applied set is not atomic.</p>
               <label for="project-set-input">Replacement files (JSON array)</label>

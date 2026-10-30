@@ -8,7 +8,7 @@ import sqlite3
 
 
 ZERO_HASH = "0" * 64
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class ProjectAuditLog:
@@ -30,7 +30,7 @@ class ProjectAuditLog:
         try:
             db.execute("BEGIN IMMEDIATE")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, SCHEMA_VERSION):
+            if version not in (0, 1, 2, SCHEMA_VERSION):
                 raise RuntimeError(f"Unsupported project audit schema version: {version}")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS project_change_events (
@@ -63,6 +63,27 @@ class ProjectAuditLog:
             db.execute(
                 """CREATE INDEX IF NOT EXISTS project_review_checkpoint_order
                    ON project_review_checkpoints (project_key, sequence DESC)"""
+            )
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS drafting_task_checkpoints (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_key TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    owner_id TEXT NOT NULL,
+                    paths_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    budget_seconds INTEGER NOT NULL,
+                    state TEXT NOT NULL,
+                    worker_active INTEGER NOT NULL,
+                    outcome_code TEXT,
+                    proposal_ids_json TEXT NOT NULL,
+                    UNIQUE (project_key, task_id)
+                )"""
+            )
+            db.execute(
+                """CREATE INDEX IF NOT EXISTS drafting_task_checkpoint_order
+                   ON drafting_task_checkpoints (project_key, sequence DESC)"""
             )
             db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             db.commit()
@@ -183,6 +204,67 @@ class ProjectAuditLog:
             if row is None:
                 raise LookupError("Project review checkpoint was not found")
             return dict(row)
+        finally:
+            db.close()
+
+    def save_task_checkpoint(self, *, task_id, owner_id, paths, created_at,
+                             budget_seconds, state, worker_active, outcome_code, proposal_ids):
+        if not self.project_key:
+            raise ValueError("Task checkpoints require a configured project identity")
+        db = self._connect()
+        try:
+            db.execute(
+                """INSERT INTO drafting_task_checkpoints
+                   (project_key, task_id, owner_id, paths_json, created_at, updated_at,
+                    budget_seconds, state, worker_active, outcome_code, proposal_ids_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(project_key, task_id) DO UPDATE SET
+                       updated_at=excluded.updated_at, state=excluded.state,
+                       worker_active=excluded.worker_active, outcome_code=excluded.outcome_code,
+                       proposal_ids_json=excluded.proposal_ids_json""",
+                (
+                    self.project_key, task_id, owner_id, json.dumps(paths), created_at,
+                    datetime.now(timezone.utc).isoformat(), budget_seconds, state,
+                    int(worker_active), outcome_code, json.dumps(proposal_ids),
+                ),
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def task_checkpoints(self, limit=100) -> dict:
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("Task checkpoint limit must be between 1 and 100")
+        db = self._connect()
+        try:
+            db.execute("BEGIN")
+            rows = db.execute(
+                """SELECT task_id, owner_id, paths_json, created_at, updated_at,
+                          budget_seconds, state, worker_active, outcome_code, proposal_ids_json
+                   FROM drafting_task_checkpoints WHERE project_key = ?
+                   ORDER BY sequence DESC LIMIT ?""",
+                (self.project_key, limit),
+            ).fetchall()
+            total = db.execute(
+                "SELECT COUNT(*) FROM drafting_task_checkpoints WHERE project_key = ?",
+                (self.project_key,),
+            ).fetchone()[0]
+            records = []
+            for row in rows:
+                record = dict(row)
+                for source, target in (("paths_json", "paths"), ("proposal_ids_json", "proposal_ids")):
+                    values = json.loads(record.pop(source))
+                    if not isinstance(values, list) or len(values) > 5 or not all(
+                        isinstance(value, str) and 1 <= len(value) <= 240 for value in values
+                    ):
+                        raise ValueError("Invalid stored task checkpoint metadata")
+                    record[target] = values
+                record["worker_active"] = bool(record["worker_active"])
+                records.append(record)
+            return {"checkpoints": records, "total": total, "truncated": total > len(records)}
         finally:
             db.close()
 
