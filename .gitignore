@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.sqlite3
+*.sqlite3-*
+runtime_logs/
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#070509">
+  <title>DPN ASTRA | Scientific Command Presence</title>
+  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/project.css">
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <canvas id="rain" aria-hidden="true"></canvas>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="bolt">ϟ</span><span class="brandstack"><b>DPN <em>ASTRA</em></b><small>ADAPTIVE SCIENTIFIC THINKING • REASONING & AUTONOMY</small></span></div>
+      <div class="topright"><span class="dot"></span><span>LOCAL PRESENCE / v0.1.0</span><span id="clock"></span></div>
+    </header>
+    <main class="layout">
+      <aside class="rail panel" aria-label="Subsystem status">
+        <div class="sectiontop"><span class="eyebrow">SUBSYSTEM ARRAY</span><span class="micro">07 NODES</span></div>
+        <div id="systems" class="systems" aria-live="polite">
+          <div class="system"><div><b>CORE</b><small>Reasoning engine</small></div><span class="state">Checking</span></div>
+          <div class="system"><div><b>SENSE</b><small>Instrument telemetry</small></div><span class="state">Unlinked</span></div>
+          <div class="system"><div><b>COMMAND</b><small>Authorized operations</small></div><span class="state">Disabled</span></div>
+          <div class="system"><div><b>WATCH</b><small>Security / anomaly</small></div><span class="state">Unlinked</span></div>
+          <div class="system"><div><b>ARCHIVE</b><small>User-approved memory</small></div><span class="state">Local</span></div>
+          <div class="system"><div><b>CONTINUITY</b><small>Protected recovery</small></div><span class="state">Planned</span></div>
+          <div class="system"><div><b>PRESENCE</b><small>Interface / voice</small></div><span class="state">Active</span></div>
+        </div>
+        <div class="railfoot"><span class="eyebrow">OPERATING DIRECTIVE</span><p>Precision before certainty. Human authority over physical systems. Evidence over invention.</p><span class="mini-line"></span><small>All hardware and external control interfaces are disconnected in this build.</small></div>
+      </aside>
+      <section class="center panel" aria-label="ASTRA visual presence">
+        <div class="sectiontop"><span class="eyebrow">PRESENCE MATRIX // NODE 001</span><span id="model-state" class="chip">CONNECTING</span></div>
+        <div class="visual">
+          <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="orbit orbit-three"></div>
+          <div class="meridian"></div>
+          <div class="presence" aria-label="Abstract holographic ASTRA symbol">
+            <svg viewBox="0 0 280 370" role="img" aria-labelledby="astra-portrait">
+              <title id="astra-portrait">ASTRA abstract light portrait</title>
+              <defs>
+                <linearGradient id="holo" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#f7f7ff"/><stop offset=".45" stop-color="#c9b5ff"/><stop offset="1" stop-color="#ff5169"/></linearGradient>
+                <linearGradient id="shade" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#cdb5ff" stop-opacity=".28"/><stop offset="1" stop-color="#ff445e" stop-opacity="0"/></linearGradient>
+                <filter id="glow"><feGaussianBlur stdDeviation="4"/></filter>
+              </defs>
+              <path d="M140 26 C88 26 69 64 70 116 C72 159 85 182 97 203 L100 230 Q70 247 49 264 Q26 282 18 345 L262 345 Q254 282 231 264 Q210 247 180 230 L182 203 C194 182 207 159 210 116 C211 64 191 26 140 26Z" fill="url(#shade)" stroke="url(#holo)" stroke-width="1.5"/>
+              <path d="M78 103 Q110 36 165 48 Q194 59 206 104 M80 105 L101 87 L124 97 L145 86 L166 95 L202 105 M97 169 Q139 195 182 169" fill="none" stroke="#fff" stroke-opacity=".37" stroke-width="1"/>
+              <path d="M110 134 Q123 126 136 134 M146 134 Q160 126 174 134 M137 133 L138 158 L148 161 M126 176 Q142 183 158 176" fill="none" stroke="url(#holo)" stroke-width="1.8" stroke-linecap="round"/>
+              <path d="M69 268 Q102 249 139 281 Q179 249 213 268 M140 282 L140 345 M100 229 Q139 255 181 229" fill="none" stroke="#b4a8ff" stroke-opacity=".7"/>
+              <path d="M140 26 C88 26 69 64 70 116 C72 159 85 182 97 203" stroke="#f4deff" stroke-width="6" opacity=".25" filter="url(#glow)" fill="none"/>
+              <g stroke="#f5e9ff" stroke-opacity=".18"><path d="M28 292 H253 M24 309 H256 M19 326 H261 M70 101 H210 M73 120 H208 M76 142 H204 M85 165 H196 M98 190 H183"/></g>
+            </svg>
+          </div>
+          <div class="scanline"></div>
+          <div class="spectrum"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+        <div class="identity"><span class="eyebrow">INTELLIGENCE DESIGNATION</span><h1>A S T R A</h1><div class="subtitle">“I would rather question a conclusion than defend an error.”</div></div>
+        <div class="centerfoot"><span><i class="square"></i> LOCAL INFERENCE</span><span><i class="square violet"></i> OPT-IN ARCHIVE</span><span><i class="square grey"></i> COMMAND LOCKED</span></div>
+      </section>
+      <section class="chatpanel panel" aria-label="Conversation and memory">
+        <div class="chathead"><div><span class="eyebrow">DIRECT CHANNEL</span><h2>Converse with ASTRA</h2><span id="project-state" class="micro">PROJECT CONTEXT: OFF</span></div><button id="clear" class="ghost" title="Clear current session conversation">Clear chat</button></div>
+        <div id="conversation" class="conversation" role="log" aria-label="Conversation transcript" aria-live="polite">
+          <div class="message astra"><span class="speaker">ASTRA / INITIALIZATION</span><p>Presence console established. Connect a local Ollama model to begin a real conversation. Until then, I won't pretend my reasoning engine is online.</p></div>
+        </div>
+        <details id="project-inspector" class="memory" hidden>
+          <summary class="eyebrow">PROJECT INSPECTOR / REVIEW-GATED WRITES</summary>
+          <form id="project-search-form" class="memoryform">
+            <label class="visuallyhidden" for="project-search-input">Search project source</label>
+            <input id="project-search-input" maxlength="200" placeholder="Search source and configuration">
+            <button class="ghost" type="submit">Search</button>
+          </form>
+          <section class="change-workbench">
+            <span class="eyebrow">FIXED TEST PROFILE / LOCAL SANDBOX</span>
+            <button id="project-test-run" class="ghost" type="button" disabled>Run unit tests in sandbox</button>
+            <button id="project-test-cancel" class="ghost" type="button" disabled>Cancel active sandbox run</button>
+            <p id="project-sandbox-status" class="notice" role="status">Checking the pinned offline runner…</p>
+            <pre id="project-sandbox-output" class="change-diff" aria-label="Latest sandbox test output"></pre>
+            <div class="change-history-head">
+              <span class="eyebrow">SANDBOX RUN HISTORY / METADATA ONLY</span>
+              <button id="project-sandbox-history-refresh" class="ghost" type="button">Refresh</button>
+            </div>
+            <p id="project-sandbox-history-status" class="notice">No test run has been requested.</p>
+            <ul id="project-sandbox-history" class="memorylist" aria-live="polite"></ul>
+          </section>
+          <button id="project-dependencies" class="ghost" type="button">Inspect Python imports</button>
+          <p id="project-dependencies-status" class="notice" aria-live="polite">Read-only dependency overview; no project code is executed.</p>
+          <ul id="project-dependencies-results" class="memorylist" aria-live="polite"></ul>
+          <button id="project-validate-all" class="ghost" type="button">Validate project syntax</button>
+          <p id="project-validation-summary" class="notice" aria-live="polite">Checks eligible Python, JSON, and TOML files without executing project code.</p>
+          <ul id="project-validation-results" class="memorylist" aria-live="polite"></ul>
+          <p id="project-search-status" class="notice">Source search is read-only. File changes require a reviewed diff and separate confirmation. Test execution is limited to the separately confirmed sandbox profile above.</p>
+          <div id="project-search-results" class="memorylist" aria-live="polite"></div>
+          <section class="change-workbench">
+            <span class="eyebrow">CHANGE REVIEW / USER APPROVAL REQUIRED</span>
+            <form id="project-file-form" class="memoryform">
+              <label class="visuallyhidden" for="project-file-path">Existing project file path</label>
+              <input id="project-file-path" maxlength="240" placeholder="Existing relative file path (e.g. src/core.py)" required>
+              <button class="ghost" type="submit">Load</button>
+            </form>
+            <button id="project-validate" class="ghost" type="button" disabled>Static syntax check</button>
+            <p id="project-validation-status" class="notice" aria-live="polite">Python, JSON, and TOML syntax checks do not execute project code.</p>
+            <label class="visuallyhidden" for="project-file-content">Proposed file content</label>
+            <textarea id="project-file-content" maxlength="24576" rows="10" spellcheck="false" placeholder="Load an existing UTF-8 project file to review or edit it. Changes are not written until you review the diff and confirm Apply." disabled></textarea>
+            <button id="project-propose" class="ghost" type="button" disabled>Preview change</button>
+            <label for="project-draft-instruction">Requested change for local model</label>
+            <textarea id="project-draft-instruction" maxlength="4000" rows="3" placeholder="Describe one concrete change to the selected existing file. Generation stages a diff only."></textarea>
+            <button id="project-draft" class="ghost" type="button">Generate reviewed draft</button>
+            <p class="notice">Drafting sends the selected file verbatim and bounded repository excerpts to your local model. Review source for secrets first. It uses the on-disk file, not unsaved editor text. No tests or commands run.</p>
+            <p id="project-change-status" class="notice" aria-live="polite">No project changes staged. Commands are never executed.</p>
+            <pre id="project-change-diff" class="change-diff" aria-label="Proposed source diff"></pre>
+            <div class="memoryform">
+              <button id="project-apply" class="primary" type="button" hidden>Apply reviewed change</button>
+              <button id="project-rollback" class="ghost" type="button" hidden>Rollback applied change</button>
+            </div>
+            <div class="change-history-head">
+              <span class="eyebrow">CHANGE HISTORY / CURRENT PROCESS</span>
+              <button id="project-history-refresh" class="ghost" type="button">Refresh</button>
+            </div>
+            <p id="project-history-status" class="notice">Change history is temporary and clears when ASTRA exits.</p>
+            <ul id="project-change-history" class="memorylist" aria-live="polite"></ul>
+            <section class="change-set">
+              <h3>Multi-file review set</h3>
+              <label for="project-set-paths">Local-model targets (one existing relative path per line)</label>
+              <textarea id="project-set-paths" maxlength="1300" rows="3" spellcheck="false" placeholder="src/core.py&#10;tests/test_core.py"></textarea>
+              <label for="project-set-instruction">Coordinated change for local model</label>
+              <textarea id="project-set-instruction" maxlength="4000" rows="3" placeholder="Describe the change across all selected files. Every target must receive a changed, complete replacement."></textarea>
+              <button id="project-set-draft" class="ghost" type="button">Generate multi-file draft</button>
+              <label for="project-task-budget">Draft acceptance budget (10-120 seconds)</label>
+              <input id="project-task-budget" type="number" min="10" max="120" value="120">
+              <label for="project-task-id">Draft task ID (copy to resume status after reload; lost on server restart)</label>
+              <input id="project-task-id" maxlength="128" spellcheck="false">
+              <button id="project-task-refresh" class="ghost" type="button">Refresh draft task</button>
+              <button id="project-task-list" class="ghost" type="button">Find draft tasks</button>
+              <button id="project-task-cancel" class="ghost" type="button">Cancel draft task</button>
+              <button id="project-task-load" class="ghost" type="button">Load completed draft review</button>
+              <p id="project-task-status" class="notice" role="status">No task selected. Cancellation discards late output; it cannot interrupt an in-flight inference call. Refresh status explicitly; no automatic retry or task resumption.</p>
+              <ul id="project-task-list-results" class="memorylist" aria-label="Current-process drafting tasks"></ul>
+              <button id="project-task-history" class="ghost" type="button">Show task checkpoint history</button>
+              <p id="project-task-history-status" class="notice" role="status">Task metadata can survive restart when project audit storage is configured. Historical records do not restore tasks, source, reviews or authorization.</p>
+              <ul id="project-task-history-results" class="memorylist" aria-label="Recorded drafting task checkpoints"></ul>
+              <p class="notice">Requires approval to send every selected on-disk file verbatim plus bounded repository evidence to local inference. Review for secrets first. Maximum 48 KiB source total. Drafting only stages diffs; it never applies changes or runs tests.</p>
+              <p class="notice">Submit 1-5 existing files as a JSON array of {"path":"sample.py","content":"complete replacement"}. Maximum 48 KiB total UTF-8 content; each file stays within 24 KiB. Preview never writes files. Each Apply is independent: a partially applied set is not atomic.</p>
+              <label for="project-set-input">Replacement files (JSON array)</label>
+              <textarea id="project-set-input" maxlength="60000" rows="8" spellcheck="false" placeholder='[{"path":"src/core.py","content":"complete replacement\n"},{"path":"tests/test_core.py","content":"complete replacement\n"}]'></textarea>
+              <button id="project-set-preview" class="ghost" type="button">Preview multi-file set</button>
+              <button id="project-set-refresh" class="ghost" type="button">Refresh set states</button>
+              <button id="project-set-recover" class="ghost" type="button">Recover reviews / show checkpoints</button>
+              <p id="project-checkpoint-status" class="notice" role="status">Checkpoint metadata can survive restart when project audit storage is configured. Source, diffs and rollback bytes do not.</p>
+              <ul id="project-checkpoints" class="memorylist" aria-label="Recorded review checkpoints"></ul>
+              <p id="project-set-status" class="notice" role="status">No review set loaded. Rollback snapshots expire after 15 minutes or process restart. No tests or commands run.</p>
+              <div id="project-set-results" aria-label="Per-file review set"></div>
+            </section>
+          </section>
+        </details>
+        <div class="composer">
+          <form id="chat-form"><label class="visuallyhidden" for="message">Message ASTRA</label><textarea id="message" maxlength="4000" rows="3" placeholder="Ask a question. Propose an experiment. Challenge an assumption."></textarea><div class="composerbar"><div><button type="button" id="mic" class="ghost" title="Dictation uses browser microphone permission">◉ Mic</button><button type="button" id="speech" class="ghost" aria-pressed="false" title="Speak replies using browser voices">◈ Voice: Off</button></div><button id="send" type="submit" class="primary">TRANSMIT <span>↗</span></button></div></form>
+          <p id="notice" class="notice">Conversation is in memory only and clears when the process restarts. Saved memories are separate.</p>
+        </div>
+        <div class="memory">
+          <div class="memorytitle"><span class="eyebrow">ARCHIVE / USER-APPROVED</span><span id="memory-count" class="micro">0 ENTRIES</span></div>
+          <label for="memory-scope">Browse and save scope</label>
+          <select id="memory-scope">
+            <option value="global">Global (available in all projects)</option>
+            <option id="memory-project-option" value="project" disabled>Current configured project</option>
+          </select>
+          <p id="memory-project-status" class="notice">Project scope requires configured repository context. Existing notes remain global.</p>
+          <form id="memory-form" class="memory-editor">
+            <label for="memory-kind">Memory category (user-supplied, not independently verified)</label>
+            <select id="memory-kind" name="kind">
+              <option value="note">Note</option>
+              <option value="preference">Preference</option>
+              <option value="decision">Decision</option>
+              <option value="episode">Episode</option>
+              <option value="procedure">Procedure (not execution approval)</option>
+              <option value="hypothesis">Hypothesis (not a verified finding)</option>
+              <option value="fiction">Fiction / canon (excluded from chat memory)</option>
+            </select>
+            <label class="visuallyhidden" for="memory-source">Optional source reference</label>
+            <input id="memory-source" maxlength="240" placeholder="Optional source reference (stored as text, not fetched)">
+            <div class="memoryform">
+              <label class="visuallyhidden" for="memory-input">Memory to save</label>
+              <input id="memory-input" maxlength="1000" placeholder="Save only what you approve for local retention" required>
+              <button id="memory-save" class="ghost" type="submit">Save</button>
+            </div>
+            <p id="memory-edit-status" class="notice" role="status"></p>
+            <button id="memory-cancel" class="ghost" type="button" hidden>Cancel edit</button>
+          </form>
+          <p class="notice">Save approves local retention. Notes are not encrypted. Fiction stays out of normal chat context. Existing legacy notes have no recorded consent timestamp.</p>
+          <ul id="memory-list" class="memorylist" aria-label="Saved memories"></ul>
+          <div class="memory-navigation">
+            <button id="memory-newest" class="ghost" type="button">Newest memories</button>
+            <button id="memory-older" class="ghost" type="button" disabled>Older memories</button>
+          </div>
+          <button id="memory-export" class="ghost" type="button">Export all memories</button>
+          <p id="memory-export-status" class="notice" role="status">JSON exports include every category, including fiction. Downloads are unencrypted and are not restorable backups; use the local SQLite snapshot command for recovery.</p>
+        </div>
+      </section>
+    </main>
+    <footer class="footer"><span>DPN TECHNOLOGY // RESEARCH & DEVELOPMENT</span><span>ASTRA IS SOFTWARE • NOT A CLAIM OF SENTIENCE</span><span>127.0.0.1 / PRIVATE LOOPBACK</span></footer>
+  </div>
+</body>
+</html>

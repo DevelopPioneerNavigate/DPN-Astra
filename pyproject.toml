@@ -1,0 +1,9 @@
+[project]
+name = "dpn-astra"
+version = "0.1.0"
+description = "DPN ASTRA local-first AI research companion"
+requires-python = ">=3.11"
+license = {text = "Proprietary - All rights reserved"}
+
+[tool.setuptools.packages.find]
+include = ["astra*"]
