@@ -9,6 +9,10 @@ from .repository import RepositoryContext
 
 
 MAX_DRAFT_RESPONSE_BYTES = MAX_CHANGE_BYTES * 8
+MAX_DRAFT_EVIDENCE_CHARS = 2_400
+EVIDENCE_TRUNCATION_MARKER = (
+    "\n[Supplementary repository evidence truncated to fit the drafting budget.]"
+)
 DRAFT_SYSTEM = """You draft a replacement for one existing source file.
 Return only a JSON object with exactly one key, "content", containing the complete
 replacement UTF-8 file as a string. No markdown fences or additional keys.
@@ -43,12 +47,12 @@ class ProjectDrafting:
             raise ProjectDraftConflict("A project draft is already running; wait for it to finish")
         try:
             file = self.repository.changes.read_file(path)
-            evidence = self.repository.context_for(instruction.strip())
+            evidence, evidence_truncated = self._repository_evidence(instruction.strip())
             request = json.dumps({
-                "instruction": instruction.strip(),
                 "target_path": file["path"],
                 "original_content": file["content"],
                 "repository_evidence": evidence,
+                "instruction": instruction.strip(),
             }, ensure_ascii=False)
             messages: list[ChatMessage] = [
                 {"role": "system", "content": DRAFT_SYSTEM},
@@ -72,6 +76,8 @@ class ProjectDrafting:
                 "provider": self.provider.name,
                 "model": self.provider.model,
                 "tests_executed": False,
+                "repository_evidence_characters": len(evidence),
+                "repository_evidence_truncated": evidence_truncated,
             })
             return response
         finally:
@@ -93,13 +99,14 @@ class ProjectDrafting:
                 raise ValueError("Draft targets cannot contain duplicate files")
             if sum(file["bytes"] for file in files) > MAX_CHANGE_SET_BYTES:
                 raise ValueError(f"Draft source exceeds {MAX_CHANGE_SET_BYTES} UTF-8 bytes")
+            evidence, evidence_truncated = self._repository_evidence(instruction.strip())
             request = json.dumps({
-                "instruction": instruction.strip(),
                 "targets": [
                     {"path": file["path"], "original_content": file["content"]}
                     for file in files
                 ],
-                "repository_evidence": self.repository.context_for(instruction.strip()),
+                "repository_evidence": evidence,
+                "instruction": instruction.strip(),
             }, ensure_ascii=False)
             messages: list[ChatMessage] = [
                 {"role": "system", "content": SET_DRAFT_SYSTEM},
@@ -126,7 +133,11 @@ class ProjectDrafting:
                 stage(entries, baselines) if stage is not None
                 else self.repository.validation.propose_many(entries, expected_sha256=baselines)
             )
-            response.update({"provider": self.provider.name, "model": self.provider.model})
+            response.update({
+                "provider": self.provider.name, "model": self.provider.model,
+                "repository_evidence_characters": len(evidence),
+                "repository_evidence_truncated": evidence_truncated,
+            })
             return response
         finally:
             self._lock.release()
@@ -137,6 +148,14 @@ class ProjectDrafting:
             raise PermissionError("Model drafting requires explicit approval to send source to local inference")
         if not isinstance(instruction, str) or not 1 <= len(instruction.strip()) <= 4000:
             raise ValueError("Draft instruction must contain 1-4000 characters")
+
+    def _repository_evidence(self, instruction: str) -> tuple[str, bool]:
+        evidence = self.repository.context_for(instruction)
+        if len(evidence) <= MAX_DRAFT_EVIDENCE_CHARS:
+            return evidence, False
+        prefix = evidence[:MAX_DRAFT_EVIDENCE_CHARS - len(EVIDENCE_TRUNCATION_MARKER)]
+        prefix = prefix.rpartition("\n")[0]
+        return prefix + EVIDENCE_TRUNCATION_MARKER, True
 
     def _generate(self, messages: list[ChatMessage], limit: int):
         answer = self.provider.chat(messages, json_mode=True)

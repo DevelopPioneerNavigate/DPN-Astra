@@ -498,6 +498,17 @@ establish that a draft is complete or correct: ASTRA still rejects duplicate key
 unexpected shapes, oversized content, invalid supported syntax, and stale source
 hashes. It never applies a generated draft without separate approval.
 
+Both drafting paths cap supplementary repository evidence at **2,400 characters**,
+including an explicit truncation marker. Oversized evidence is cut at a newline;
+the complete selected target sources and instruction are never shortened by this
+budget. The instruction is placed after the reference data. Responses report
+`repository_evidence_characters` and `repository_evidence_truncated`; the console
+warns when a successful draft or completed task used trimmed evidence. This is a
+character budget for optional evidence, not a tokenizer-aware total-context or
+output-token guarantee. Large targets can still exceed a model's usable context.
+Review omissions and supply a narrower task when necessary. Chat retrieval keeps
+its existing separate context budget.
+
 The Ollama adapter validates JSON response shapes, limits each response to 4 MiB, and exposes diagnostic errors in `model_status.error` (also visible in the status-chip tooltip). Missing models are distinguished from unavailable or malformed provider responses. A failed chat returns HTTP 503 without appending fabricated history. Requests stay on the configured loopback HTTP endpoint: environment proxies and HTTP redirects are not used. Health requests use a two-second socket timeout and chat requests a 120-second socket timeout; these are not total wall-clock deadlines.
 
 Transport tests use controlled local HTTP fixtures, not a running language model. They verify protocol behavior, not inference quality or sandbox isolation.

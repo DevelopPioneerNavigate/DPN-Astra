@@ -11,7 +11,9 @@ from astra.archive import Archive
 from astra.core import AstraCore
 from astra.inference import ModelError
 from astra.project_changes import MAX_CHANGE_BYTES, MAX_CHANGE_SET_BYTES, ProjectDraftConflict
-from astra.project_drafting import ProjectDrafting
+from astra.project_drafting import (
+    EVIDENCE_TRUNCATION_MARKER, MAX_DRAFT_EVIDENCE_CHARS, ProjectDrafting,
+)
 from astra.project_validation import ProjectSyntaxError
 from astra.repository import RepositoryContext
 from astra.server import make_handler
@@ -80,6 +82,46 @@ class ProjectDraftingTests(unittest.TestCase):
                 self.drafting.draft(path, "Change it", confirmed=True)
         self.provider.chat.assert_not_called()
         self.assertEqual([], self.repository.changes.audit_log()["events"])
+
+    def test_single_draft_evidence_budget_boundaries_and_disclosure(self):
+        samples = (
+            "", "x" * MAX_DRAFT_EVIDENCE_CHARS,
+            "x" * (MAX_DRAFT_EVIDENCE_CHARS + 1),
+            "[sample.py]\n" + "1: value = 1\n" * 1000,
+            "[sample.py]\n" + "1: # \u03bb\n" * 1000,
+        )
+        for evidence in samples:
+            with self.subTest(length=len(evidence)), patch.object(
+                self.repository, "context_for", return_value=evidence,
+            ):
+                response = self.draft()
+                request = json.loads(self.provider.chat.call_args.args[0][-1]["content"])
+                supplied = request["repository_evidence"]
+                truncated = len(evidence) > MAX_DRAFT_EVIDENCE_CHARS
+                self.assertLessEqual(len(supplied), MAX_DRAFT_EVIDENCE_CHARS)
+                self.assertEqual(truncated, response["repository_evidence_truncated"])
+                self.assertEqual(len(supplied), response["repository_evidence_characters"])
+                if truncated:
+                    self.assertTrue(supplied.endswith(EVIDENCE_TRUNCATION_MARKER))
+                    prefix = supplied[:-len(EVIDENCE_TRUNCATION_MARKER)]
+                    if prefix:
+                        self.assertTrue(evidence.startswith(prefix + "\n"))
+                else:
+                    self.assertEqual(evidence, supplied)
+                self.assertEqual(self.original.decode(), request["original_content"])
+                self.assertEqual("instruction", list(request)[-1])
+                self.assertEqual(self.original, self.target.read_bytes())
+
+    def test_evidence_budget_never_truncates_target_or_instruction(self):
+        source = "value = 1\n" + "# x\n" * 6000
+        self.target.write_bytes(source.encode("utf-8"))
+        instruction = ("Preserve behavior. " * 220)[:4000]
+        with patch.object(self.repository, "context_for", return_value="1: evidence\n" * 1000):
+            self.drafting.draft("sample.py", instruction, confirmed=True)
+        request = json.loads(self.provider.chat.call_args.args[0][-1]["content"])
+        self.assertEqual(source, request["original_content"])
+        self.assertEqual(instruction, request["instruction"])
+        self.assertEqual(source, self.target.read_text(encoding="utf-8"))
 
     def test_single_draft_accepts_full_instruction_limit(self):
         instruction = "Preserve behavior. " * 220
@@ -265,6 +307,24 @@ class ProjectDraftingTests(unittest.TestCase):
         self.assertEqual(instruction, request["instruction"])
         self.assertIn("[sample.py]", request["repository_evidence"])
         self.assertEqual(2, len(response["changes"]))
+        self.assertEqual(self.original, self.target.read_bytes())
+        self.assertEqual(b'{"value":1}\n', self.second.read_bytes())
+
+    def test_multi_draft_uses_same_evidence_budget_and_preserves_targets(self):
+        self.prepare_set()
+        evidence = "[other.json]\n" + '1: {"value":1}\n' * 1000
+        with patch.object(self.repository, "context_for", return_value=evidence):
+            response = self.draft_set()
+        request = json.loads(self.provider.chat.call_args.args[0][-1]["content"])
+        supplied = request["repository_evidence"]
+        self.assertLessEqual(len(supplied), MAX_DRAFT_EVIDENCE_CHARS)
+        self.assertTrue(supplied.endswith(EVIDENCE_TRUNCATION_MARKER))
+        self.assertTrue(response["repository_evidence_truncated"])
+        self.assertEqual(len(supplied), response["repository_evidence_characters"])
+        self.assertEqual(self.original.decode(), request["targets"][0]["original_content"])
+        self.assertEqual('{"value":1}\n', request["targets"][1]["original_content"])
+        self.assertEqual("Change both values", request["instruction"])
+        self.assertEqual("instruction", list(request)[-1])
         self.assertEqual(self.original, self.target.read_bytes())
         self.assertEqual(b'{"value":1}\n', self.second.read_bytes())
 

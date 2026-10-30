@@ -144,6 +144,13 @@ context returns 404, missing confirmation 403, busy/stale baselines 409, support
 syntax failure 422, and malformed/inference output failures 503.
 
 The request contains one target file plus existing bounded repository evidence.
+Single-file and coordinated drafting share a 2,400-character supplementary
+evidence budget, including an explicit truncation marker when necessary. Trimming
+stops at a newline. Neither selected source nor instruction is truncated; the
+instruction follows the reference data in the request. Both responses include
+`repository_evidence_characters` and `repository_evidence_truncated`, propagated
+through completed task results and disclosed by the console. This does not
+measure model tokens or guarantee that a complete request fits a model's context.
 It does not include conversation history or saved memories. The target is sent
 verbatim, and the UI discloses this before approval. The provider returns a strict
 single-key JSON object containing full replacement text. Raw response parsing is

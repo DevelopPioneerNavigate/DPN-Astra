@@ -765,6 +765,7 @@
       $("project-apply").hidden = false;
       status.textContent = "Draft from " + response.provider + " / " + response.model
         + ". " + (response.validation ? response.validation.language + " syntax passed. " : "No syntax validator for this file type. ")
+        + (response.repository_evidence_truncated ? "Supplementary repository evidence was truncated; target and instruction were supplied in full. " : "")
         + "Review the entire diff. No files written; no tests executed.";
       refreshProjectHistory();
     } catch (error) {
@@ -1115,6 +1116,8 @@
         : task.checkpoint_enabled ? " Metadata checkpoint storage enabled." : " No durable task checkpoint storage.")
       + " Transport interruption is unsupported. No project writes or tests executed."
       + (task.result ? " Provider: " + task.result.provider + " / " + task.result.model + "." : "")
+      + (task.result && task.result.repository_evidence_truncated
+        ? " Supplementary repository evidence was truncated; selected targets and instruction were supplied in full." : "")
       + (task.state === "completed" ? " Load the review explicitly; proposals still expire after 15 minutes or restart." : "");
   }
 
